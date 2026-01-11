@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, Download, CalendarPlus, List } from 'lucide-react';
-import {
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, Download, CalendarPlus, List, Activity } from 'lucide-react';
+/* import {
   BarChart,
   Bar,
   XAxis,
@@ -12,7 +12,9 @@ import {
   Tooltip,
   ResponsiveContainer,
   LabelList
-} from 'recharts';
+} from 'recharts'; */
+
+import ItalyMap from './components/ItalyMap';
 
 // --- Supabase Client ---
 // Placeholder config as requested. User must provide VITE_ env vars.
@@ -37,6 +39,7 @@ interface Incident {
   regione?: string;
   violazione_avvenuta?: boolean;
   in_sla?: string;
+  durata?: number | string; // Duration in minutes
   created_at?: string;
   data_chiusura_prevista?: string; // New field
   pianificazione?: string; // New field for planned intervention date
@@ -183,6 +186,18 @@ const Sidebar = ({
               <Upload size={20} />
               <span className="ml-3">Importazione Dati</span>
             </button>
+          </li>
+
+          <li>
+            <a
+              href="https://techlab4.vercel.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center p-3 rounded-xl w-full text-left group transition-all duration-300 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white hover:pl-4"
+            >
+              <FileSpreadsheet size={20} />
+              <span className="ml-3">Laboratorio</span>
+            </a>
           </li>
 
           {['admin', 'manager'].includes(user?.role || '') && (
@@ -371,11 +386,11 @@ const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilt
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-slate-900/60 font-semibold uppercase tracking-wider">
-              <th className="px-3 py-1.5">Regione</th>
-              <th className="px-3 py-1.5 text-right text-blue-400">Backlog</th>
-              <th className="px-3 py-1.5 text-right text-purple-400">Sospesi</th>
+              <th className="px-3 py-1.5 min-w-[120px]">Regione</th>
+              <th className="px-3 py-1.5 text-right text-slate-300">Backlog</th>
+              <th className="px-3 py-1.5 text-right text-yellow-500">Sospesi</th>
               <th className="px-3 py-1.5 text-right text-slate-400">Lockers</th>
-              <th className="px-3 py-1.5 text-right text-red-400">SLA Violati</th>
+              <th className="px-3 py-1.5 text-right text-red-500">Viol. SLA</th>
               <th className="px-3 py-1.5 text-right text-orange-400">SLA Scadenza</th>
               <th className="px-3 py-1.5 text-right text-amber-500">Pianificati</th>
               <th className="px-3 py-1.5 text-right text-xs text-blue-300 border-l border-white/5">Aperti Ieri</th>
@@ -390,8 +405,8 @@ const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilt
               return (
                 <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => onFilterChange(s.region, '')}>
                   <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-400 transition-colors">{s.region}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-blue-400 bg-blue-500/5">{s.backlog}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-purple-400 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Sospesi'); }}>{s.suspended}</td>
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5">{s.backlog}</td>
+                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Sospesi'); }}>{s.suspended}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5">{s.lockers}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-red-500 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Violazioni SLA'); }}>{s.slaBreach}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-orange-400">{expiringToday}</td>
@@ -464,8 +479,8 @@ const LockerStatsTable = ({ data }: { data: Incident[] }) => {
           <thead className="sticky top-0 bg-slate-50 dark:bg-slate-950 z-10 shadow-lg">
             <tr className="text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-white/5 font-semibold uppercase tracking-wider">
               <th className="px-3 py-1.5">Città</th>
-              <th className="px-3 py-1.5 text-right text-blue-400">Backlog</th>
-              <th className="px-3 py-1.5 text-right text-purple-400">Sospesi</th>
+              <th className="px-3 py-1.5 text-right text-slate-300">Backlog</th>
+              <th className="px-3 py-1.5 text-right text-yellow-500">Sospesi</th>
               <th className="px-3 py-1.5 text-right text-slate-400">Lockers</th>
               <th className="px-3 py-1.5 text-right text-red-400">SLA Violati</th>
               <th className="px-3 py-1.5 text-right text-orange-400">SLA Scadenza</th>
@@ -482,8 +497,8 @@ const LockerStatsTable = ({ data }: { data: Incident[] }) => {
               return (
                 <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer">
                   <td className="px-3 py-1.5 font-medium text-white">{s.region}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-blue-400 bg-blue-500/5">{s.backlog}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-purple-400">{s.suspended}</td>
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5">{s.backlog}</td>
+                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500">{s.suspended}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5">{s.lockers}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-red-500">{s.slaBreach}</td>
                   <td className="px-3 py-1.5 text-right font-bold text-orange-400">{expiringToday}</td>
@@ -505,8 +520,111 @@ const LockerStatsTable = ({ data }: { data: Incident[] }) => {
   );
 };
 
+// --- Regional SLA Table (New - Phase 33 & 34) ---
+const RegionalSLATable = ({ stats }: { stats: any[] }) => {
+  // Logic lifted to parent (App)
+
+  const renderCell = (num: number, total: number, target: number) => {
+    if (total === 0) return <span className="text-slate-600 font-normal">-</span>;
+    const pct = (num / total) * 100;
+    const isMet = pct >= target;
+    return (
+      <div className="flex flex-col items-end leading-none">
+        <span className={cn("font-bold text-[11px]", isMet ? "text-emerald-400" : "text-red-500")}>
+          {pct.toFixed(1)}%
+        </span>
+        <span className="text-[9px] text-slate-500 font-normal opacity-70">
+          {num}/{total}
+        </span>
+      </div>
+    );
+  };
+
+  // Controllo Cell: Display Compliance % (Total - Violations)
+  const renderControlloCell = (violations: number, total: number, target: number) => {
+    if (total === 0) return <span className="text-slate-600 font-normal">-</span>;
+    const compliant = total - violations;
+    const pct = (compliant / total) * 100;
+    const isMet = pct >= target;
+    return (
+      <div className="flex flex-col items-end leading-none">
+        <span className={cn("font-bold text-[11px]", isMet ? "text-emerald-400" : "text-red-500")}>
+          {pct.toFixed(1)}%
+        </span>
+        <span className="text-[9px] text-slate-500 font-normal opacity-70">
+          {compliant}/{total}
+        </span>
+      </div>
+    );
+  };
+
+  // Regionale Cell: 100% (Green) if passed (>=80%), 0% (Red) if failed. Empty = Standard dash
+  const renderRegionaleCell = (pct: number, total: number) => {
+    if (total === 0) return <span className="text-slate-600 font-normal">-</span>;
+
+    const passed = pct >= 80;
+    return (
+      <div className="flex flex-col items-end leading-none">
+        <span className={cn("font-bold text-[11px]", passed ? "text-emerald-400" : "text-red-500")}>
+          {passed ? '100.0%' : '0.0%'}
+        </span>
+        <span className="text-[9px] text-slate-500 font-normal opacity-70">
+          {passed ? 'Pass' : 'Fail'}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="glass-card overflow-hidden w-full">
+      <div className="p-4 border-b border-white/5 flex justify-between items-center bg-slate-900/50">
+        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <Activity size={16} className="text-emerald-400" /> Livelli di Servizio - Regioni
+        </h3>
+        <span className="text-[10px] text-slate-500 font-mono">Mese Corrente</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="text-[10px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-slate-900/60 font-semibold uppercase tracking-wider">
+              <th className="px-2 py-1 min-w-[120px]">Regione</th>
+              <th className="px-2 py-1 text-right text-slate-300">Compl. Filiali <span className="text-[9px] opacity-50 block font-normal">(Target 80%)</span></th>
+              <th className="px-2 py-1 text-right text-slate-300">Compl. Presidi <span className="text-[9px] opacity-50 block font-normal">(Target 80%)</span></th>
+              <th className="px-2 py-1 text-right text-slate-300 border-l border-white/5">Controllo Filiali <span className="text-[9px] opacity-50 block font-normal">(Target 99%)</span></th>
+              <th className="px-2 py-1 text-right text-slate-300">Controllo Presidi <span className="text-[9px] opacity-50 block font-normal">(Target 99%)</span></th>
+              <th className="px-2 py-1 text-right text-slate-300 border-l border-white/5">Regionale Filiali <span className="text-[9px] opacity-50 block font-normal">(Target 100%)</span></th>
+              <th className="px-2 py-1 text-right text-slate-300">Regionale Presidi <span className="text-[9px] opacity-50 block font-normal">(Target 100%)</span></th>
+            </tr>
+          </thead>
+          <tbody className="text-xs text-slate-300 divide-y divide-white/5">
+            {stats.length === 0 ? (
+              <tr><td colSpan={7} className="text-center py-4 text-slate-500 italic text-xs">Nessun dato SLA disponibile per il mese corrente</td></tr>
+            ) : (
+              stats.map(s => {
+                const filPct = s.fil_tot > 0 ? (s.fil_si / s.fil_tot) * 100 : 0;
+                const presPct = s.pres_tot > 0 ? (s.pres_si / s.pres_tot) * 100 : 0;
+                return (
+                  <tr key={s.region} className="hover:bg-white/5 transition-colors">
+                    <td className="px-2 py-1 font-medium text-white">{s.region}</td>
+                    <td className="px-2 py-1 text-right border-slate-800">{renderCell(s.fil_si, s.fil_tot, 80)}</td>
+                    <td className="px-2 py-1 text-right border-slate-800">{renderCell(s.pres_si, s.pres_tot, 80)}</td>
+                    <td className="px-2 py-1 text-right border-l border-white/5 border-slate-800 bg-slate-900/20">{renderControlloCell(s.fil_ctrl_viol, s.fil_ctrl_tot, 99)}</td>
+                    <td className="px-2 py-1 text-right border-slate-800 bg-slate-900/20">{renderControlloCell(s.pres_ctrl_viol, s.pres_ctrl_tot, 99)}</td>
+                    <td className="px-2 py-1 text-right border-l border-white/5 border-slate-800">{renderRegionaleCell(filPct, s.fil_tot)}</td>
+                    <td className="px-2 py-1 text-right border-slate-800">{renderRegionaleCell(presPct, s.pres_tot)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // 3b. Item Analysis Chart
-const ItemBarChart = ({ data }: { data: Incident[] }) => {
+/* const ItemBarChart = ({ data }: { data: Incident[] }) => {
   const chartData = useMemo(() => {
     const counts: Record<string, number> = {};
     data.forEach(i => {
@@ -548,10 +666,10 @@ const ItemBarChart = ({ data }: { data: Incident[] }) => {
       </div>
     </div>
   );
-};
+}; */
 
 // 3c. Top Recidivist Assets Chart (Last 30 Days)
-const TopAssetsChart = ({ filteredData, historyData }: { filteredData: Incident[], historyData: Incident[] }) => {
+/* const TopAssetsChart = ({ filteredData, historyData }: { filteredData: Incident[], historyData: Incident[] }) => {
   const chartData = useMemo(() => {
 
     const thirtyDaysAgo = new Date();
@@ -607,7 +725,6 @@ const TopAssetsChart = ({ filteredData, historyData }: { filteredData: Incident[
               itemStyle={{ color: '#fff' }}
               cursor={{ fill: 'rgba(255,255,255,0.05)' }}
             />
-            {/* Red color for recidivists */}
             <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]}>
               <LabelList dataKey="value" position="right" fill="#e2e8f0" fontSize={11} />
             </Bar>
@@ -616,7 +733,7 @@ const TopAssetsChart = ({ filteredData, historyData }: { filteredData: Incident[
       </div>
     </div>
   );
-};
+}; */
 
 // 3d. Raw Data Modal
 const RawDataModal = ({ data, onClose }: { data: any, onClose: () => void }) => {
@@ -795,7 +912,7 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
                 <h2 className="text-2xl font-bold text-white tracking-tight">{incident.numero}</h2>
                 {/* Status Badge */}
                 <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-bold border uppercase tracking-wider",
-                  incident.stato === 'Aperto' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                  incident.stato === 'Aperto' ? 'bg-slate-500/10 text-slate-300 border-slate-500/20' :
                     (incident.stato === 'In Lavorazione' || incident.stato === 'In Corso') ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
                       incident.stato === 'Chiuso' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                         'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
@@ -1308,10 +1425,11 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
                 <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-300 transition-colors">{row.numero}</td>
                 <td className="px-3 py-1.5">
                   <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider",
-                    row.stato === 'Aperto' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                      (row.stato === 'In Lavorazione' || row.stato === 'In Corso') ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                        row.stato === 'Chiuso' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                          'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                    ['Aperto', 'Open', 'New'].includes(row.stato || '') ? 'bg-slate-500/10 text-slate-300 border-slate-500/20' :
+                      ['In Lavorazione', 'In Corso', 'WIP', 'Assigned', 'Active'].includes(row.stato || '') ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                        ['Sospeso', 'Suspended', 'Pending'].includes(row.stato || '') ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                          ['Chiuso', 'Closed', 'Resolved'].includes(row.stato || '') ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
+                            'bg-slate-800 text-slate-500 border-slate-700'
                   )}>
                     {row.stato || 'N/A'}
                   </span>
@@ -1372,20 +1490,39 @@ const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
       const workbook = XLSX.read(data, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      let json: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      // Special handling for LDS files: Row 1 is title, Row 2 is Header.
+      const isLDS = file.name.toUpperCase().includes('LDS');
+      let json: any[] = XLSX.utils.sheet_to_json(worksheet, isLDS ? { range: 1 } : undefined);
 
       addLog(`Parsed ${json.length} rows.`);
 
-      const processExcelDate = (val: any) => {
+      const processExcelDate = (val: any, stripTime = false) => {
         if (!val) return null;
-        if (val instanceof Date) return val.toISOString();
-        if (typeof val === 'number') {
+        let dateObj: Date | null = null;
+
+        if (val instanceof Date) {
+          dateObj = val;
+        } else if (typeof val === 'number') {
           // Excel Serial Date -> JS Date
           // (Serial - 25569) * 86400 * 1000
-          const date = new Date((val - 25569) * 86400000);
-          return date.toISOString();
+          dateObj = new Date((val - 25569) * 86400000);
+        } else {
+          // Try string parsing
+          dateObj = new Date(val);
         }
-        return val; // Assume string or compatible format
+
+        if (dateObj && !isNaN(dateObj.getTime())) {
+          if (stripTime) {
+            // Return YYYY-MM-DD
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+          }
+          return dateObj.toISOString();
+        }
+        return val;
       };
 
       // SPECIAL HANDLING: PLANNING IMPORT
@@ -1397,10 +1534,10 @@ const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
 
         // Process sequentially to be safe
         for (const row of json) {
-          const numero = row['Numero'];
-          let pianificazione = row['Pianificazione'];
+          const numero = row['Numero'] || row['numero'];
+          let pianificazione = row['Pianificazione'] || row['pianificazione'];
 
-          if (!numero) {
+          if (!numero || !pianificazione) {
             skippedCount++; continue;
           }
 
@@ -1515,14 +1652,33 @@ const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
         // Assuming user means the header is on row 2, or row 1 is title.
         // If sheet_to_json picked wrong header, we might have bad keys.
         // Assuming standard header row for now.
-        // Rename IdTicket -> Numero
+        // Helper to find ID column
+        const findId = (r: any) => r['IdTicket'] || r['ID Ticket'] || r['Numero'] || r['Ticket'] || r['id_ticket'] || r['IDTicket'];
+
+        if (json.length > 0) {
+          const firstRow = json[0];
+          if (!findId(firstRow)) {
+            addLog("⚠️ Warning: Could not find 'IdTicket' or 'Numero' column. Available keys: " + Object.keys(firstRow).join(", "));
+          }
+        }
+
         normalizedBuffer = json.map(row => ({
-          numero: row['IdTicket'],
+          // Defaults for CREATE (if incident doesn't exist)
+          stato: 'Chiuso', // Force status to Closed for LDS-only records
+          gruppo_assegnazione: 'EUS_LASER_MICROINF_INC',
+          breve_descrizione: 'Incidente importato da LDS - Dati parziali',
+
+          numero: findId(row),
           manutentore: row['Manutentore'],
           clone: row['Clone'],
-          data_pr_trasf: processExcelDate(row['DataPrTrasf']),
-          data_sol_guasto: processExcelDate(row['DataSolGuasto']),
-          data_chiusura: processExcelDate(row['DataChiusura']),
+          data_pr_trasf: processExcelDate(row['DataPrTrasf'], true),
+          data_sol_guasto: processExcelDate(row['DataSolGuasto'], true),
+          data_chiusura: processExcelDate(row['DataChiusura'], true),
+
+          // Ensure dates are populated for new records to avoid null constraints or logic errors
+          // Use DataChiusura as fallback for opening date if missing, to maintain consistency
+          data_apertura: processExcelDate(row['DataChiusura'], true), // Fallback
+
           classe_app: row['ClasseApp'],
           servizio_hd: row['ServizioHD'],
           causale: row['Causale'],
@@ -1530,7 +1686,7 @@ const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
           in_sla: row['inSla'],
           dbanca: row['DBANCA'],
           citta: row['Citta'],
-          indirizzo: row['Indirizzo'],
+          indirizzo_intervento: row['Indirizzo'], // Mapped to correct DB column
           regione: row['Regione'],
           area_metro: row['AreaMetro'],
           descrizione_dipendenza: row['Descrizione_Dipendenza'],
@@ -1861,6 +2017,7 @@ function App() {
   // Regional/Status Filters for Dashboard
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
 
   // Theme
   useEffect(() => {
@@ -1913,6 +2070,7 @@ function App() {
         const { data, error } = await supabase
           .from('incidents')
           .select('*')
+          .in('gruppo_assegnazione', ['EUS_LASER_MICROINF_INC', 'EUS_LOCKER_LASER_MICROINF_INC'])
           .range(page * pageSize, (page + 1) * pageSize - 1);
 
         if (error) throw error;
@@ -2009,23 +2167,30 @@ function App() {
       }
     }
 
-    return data;
-  }, [incidents, selectedStatus]);
+    // Supplier Filter
+    if (selectedSupplier) {
+      data = data.filter(i => i.fornitore === selectedSupplier);
+    }
 
-  const fullyFilteredData = useMemo(() => {
+    return data;
+  }, [incidents, selectedStatus, selectedSupplier]);
+
+  /* const fullyFilteredData = useMemo(() => {
     if (!selectedRegion) return dashboardData;
     return dashboardData.filter(i => i.regione === selectedRegion);
-  }, [dashboardData, selectedRegion]);
+  }, [dashboardData, selectedRegion]); */
 
   // Stats (calculated on RAW incidents or Filtered? Requirement: "Le Card in alto... filtreranno i grafici". The KPIs themselves usually show Total context, but often dashboards allow them to filter.
   // BUT: If I click "In Lavorazione", should "Totale" change to only "In Lavorazione"? Usually no, KPIs act as top-level summary.
   // HOWEVER, if selectedRegion is active, KPIs *should* reflect that region.
   // So KPIs should be based on `incidents` filtered by `selectedRegion` ONLY, but NOT filtered by `selectedStatus` (otherwise clicking one zeroes the others).
   const statsData = useMemo(() => {
-    // Filter only by Region for the KPI numbers, so we see context
-    if (!selectedRegion) return incidents;
-    return incidents.filter(i => i.regione === selectedRegion);
-  }, [incidents, selectedRegion]);
+    // Filter by Region AND Supplier (Context), but NOT Status (Selector)
+    let res = incidents;
+    if (selectedRegion) res = res.filter(i => i.regione === selectedRegion);
+    if (selectedSupplier) res = res.filter(i => i.fornitore === selectedSupplier);
+    return res;
+  }, [incidents, selectedRegion, selectedSupplier]);
 
   const stats = useMemo(() => {
     // Stats logic: use fullyFilteredData if we want stats to reflect selected region (+ status if selected, but usually stats are 'top level')
@@ -2040,13 +2205,98 @@ function App() {
     const suspended = statsData.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '')).length;
     const closed = statsData.filter(i => ['Chiuso', 'Closed'].includes(i.stato || '')).length;
 
-    const slaBreach = statsData.filter(i => isSlaBreach(i.violazione_avvenuta)).length;
+    const slaBreach = statsData.filter(i => isSlaBreach(i.violazione_avvenuta) && !['Chiuso', 'Closed'].includes(i.stato || '')).length;
 
     const openedToday = statsData.filter(i => isToday(i.data_ultima_riassegnazione)).length;
     const closedToday = statsData.filter(i => isToday(i.chiuso)).length;
 
     return { total, open, closed, slaBreach, suspended, openedToday, closedToday };
   }, [statsData]);
+
+  // NEW: State for Map Mode
+  const [mapMode, setMapMode] = useState<'SLA' | 'BACKLOG'>('SLA');
+
+  // Extract unique Suppliers for Filter UI
+  const supplierList = useMemo(() => {
+    const s = new Set<string>();
+    incidents.forEach(i => {
+      if (i.fornitore) s.add(i.fornitore);
+    });
+    return Array.from(s).sort();
+  }, [incidents]);
+
+  // NEW: Calculate Regional Stats for Table AND Map (Lifted Logic)
+  const regionalStats = useMemo(() => {
+    const data = dashboardData || []; // Use currently available data
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Base Filter: Has in_sla AND Closed in Current Month
+    // Note: This logic MATCHES the one previously inside RegionalSLATable
+    const filtered = data.filter(i => {
+      if (!i || !i.in_sla || !i.data_chiusura) return false;
+      try {
+        const d = new Date(i.data_chiusura);
+        if (isNaN(d.getTime())) return false;
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      } catch (e) { return false; }
+    });
+
+    const map = new Map<string, {
+      region: string;
+      fil_si: number; fil_tot: number;
+      pres_si: number; pres_tot: number;
+      fil_ctrl_viol: number; fil_ctrl_tot: number;
+      pres_ctrl_viol: number; pres_ctrl_tot: number;
+    }>();
+
+    filtered.forEach(i => {
+      const region = i.regione || 'N/D';
+      if (!map.has(region)) {
+        map.set(region, {
+          region,
+          fil_si: 0, fil_tot: 0,
+          pres_si: 0, pres_tot: 0,
+          fil_ctrl_viol: 0, fil_ctrl_tot: 0,
+          pres_ctrl_viol: 0, pres_ctrl_tot: 0,
+        });
+      }
+      const s = map.get(region)!;
+      const service = String(i.servizio_hd || '').trim().toUpperCase();
+      const slaVal = String(i.in_sla || '').trim().toUpperCase();
+      const duration = Number(i.durata);
+
+      // Validate SLA Value (SI/NO only)
+      const isValidSla = slaVal === 'SI' || slaVal === 'NO';
+      const isSi = slaVal === 'SI';
+
+      // Complessivo (SI / Total)
+      if (isValidSla) {
+        if (service === 'TECNOFIL') {
+          s.fil_tot++;
+          if (isSi) s.fil_si++;
+        } else if (service === 'TECNODIR') {
+          s.pres_tot++;
+          if (isSi) s.pres_si++;
+        }
+      }
+
+      // Controllo (Compliance / Total) - Same subset
+      if (isValidSla) {
+        const isViolation = !isNaN(duration) && duration > 2640;
+        if (service === 'TECNOFIL') {
+          s.fil_ctrl_tot++;
+          if (isViolation) s.fil_ctrl_viol++;
+        } else if (service === 'TECNODIR') {
+          s.pres_ctrl_tot++;
+          if (isViolation) s.pres_ctrl_viol++;
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.region.localeCompare(b.region));
+  }, [dashboardData]);
 
   const handleIncidentUpdate = (updatedIncident: Incident) => {
     setIncidents(prev => prev.map(i => i.numero === updatedIncident.numero ? updatedIncident : i));
@@ -2059,7 +2309,7 @@ function App() {
   if (!session) return <AuthForm />;
 
   return (
-    <div className={cn("min-h-screen text-slate-900 dark:text-slate-100 selection:bg-blue-500/30 bg-[#dbe4ee] dark:bg-slate-900 transition-colors duration-300", isDark ? 'dark' : '')}>
+    <div className={cn("min-h-screen text-slate-900 dark:text-slate-100 selection:bg-blue-500/30 bg-[#dbe4ee] dark:bg-slate-950 transition-colors duration-300", isDark ? 'dark' : '')}>
       <Sidebar
         currentView={view}
         setView={setView}
@@ -2112,6 +2362,29 @@ function App() {
 
             <KPICards stats={stats} selectedStatus={selectedStatus} onStatusSelect={setSelectedStatus} />
 
+            {/* Supplier Filter Cards (Phase 36) */}
+            <div className="flex flex-wrap gap-2 mb-8">
+              <button
+                onClick={() => setSelectedSupplier(null)}
+                className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                  !selectedSupplier ? "bg-white text-slate-900 border-white shadow-lg shadow-white/10 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
+                )}
+              >
+                Tutti i Fornitori
+              </button>
+              {supplierList.map(sup => (
+                <button
+                  key={sup}
+                  onClick={() => setSelectedSupplier(selectedSupplier === sup ? null : sup)}
+                  className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                    selectedSupplier === sup ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
+                  )}
+                >
+                  {sup}
+                </button>
+              ))}
+            </div>
+
             <div className="glass-card mb-8 overflow-hidden flex flex-col">
               <div className="p-6 pb-0">
                 <h3 className="text-lg font-semibold mb-4 text-white flex items-center gap-2">
@@ -2134,33 +2407,269 @@ function App() {
               </div>
             </div>
 
-            {/* NEW: Item Analysis */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              <div className="glass-card p-6">
-                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                  <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
-                  Asset in Backlog
+            {/* NEW SECTION: Livelli di Servizio */}
+            <div className="glass-card mb-8 overflow-hidden flex flex-col">
+              <div className="p-6 pb-0 mb-4">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <div className="w-1 h-6 bg-emerald-500 rounded-full"></div>
+                  Livelli di Servizio
+                  <span className="text-xs font-normal text-slate-500 ml-2">(Mese Corrente - Chiusi)</span>
                 </h3>
-                <ItemBarChart data={
-                  selectedStatus
-                    ? fullyFilteredData
-                    : fullyFilteredData.filter(i => ['Aperto', 'In Corso', 'In Lavorazione', 'Sospeso', 'Suspended'].includes(i.stato || ''))
-                } />
-                <p className="text-xs text-center text-slate-500 mt-4 italic">Distribuzione per Tipologia (Backlog)</p>
               </div>
 
-              <div className="glass-card p-6">
-                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                  <div className="w-1 h-6 bg-red-500 rounded-full"></div>
-                  Asset recidivi
-                </h3>
-                <TopAssetsChart
-                  filteredData={fullyFilteredData}
-                  historyData={statsData}
-                />
-                <p className="text-xs text-center text-slate-500 mt-4 italic">Top 10 Asset con più interventi (Ultimi 30gg)</p>
+              <div className="p-6 pt-0 flex flex-col gap-4">
+                {(() => {
+                  // SAFETY: Ensure data exists
+                  if (!dashboardData || !Array.isArray(dashboardData)) return null;
+
+                  const now = new Date();
+                  const currentMonth = now.getMonth();
+                  const currentYear = now.getFullYear();
+
+                  // Base Filter: Has in_sla AND Closed in Current Month
+                  const baseLdsData = dashboardData.filter(i => {
+                    if (!i || !i.in_sla || !i.data_chiusura) return false;
+                    try {
+                      const d = new Date(i.data_chiusura);
+                      if (isNaN(d.getTime())) return false;
+                      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                    } catch (e) { return false; }
+                  });
+
+                  const renderCard = (title: string, filterFn: (i: Incident) => boolean) => {
+                    const subset = baseLdsData.filter(filterFn);
+                    // Strict counting: SI / (SI + NO)
+                    const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                    const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                    const totalValid = siCount + noCount;
+
+                    if (totalValid === 0) return (
+                      <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                        <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
+                      </div>
+                    );
+
+                    const percentage = (siCount / totalValid) * 100;
+                    const isTargetMet = percentage >= 90;
+
+                    return (
+                      <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                        isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                      )}>
+                        <div className="flex justify-between items-center">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                            <span className="text-[10px] text-slate-500">{siCount} su {totalValid} interventi</span>
+                          </div>
+                          <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                            {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  const renderControlloCard = (title: string, filterFn: (i: Incident) => boolean) => {
+                    const subset = baseLdsData.filter(filterFn);
+                    // Denominator: Total (SI + NO)
+                    const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                    const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                    const totalValid = siCount + noCount;
+
+                    if (totalValid === 0) return (
+                      <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                        <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
+                      </div>
+                    );
+
+                    const violations = subset.filter(i => {
+                      const slaVal = String(i.in_sla || '').trim().toUpperCase();
+                      if (slaVal !== 'SI' && slaVal !== 'NO') return false;
+                      const d = Number(i.durata);
+                      return !isNaN(d) && d > 2640;
+                    }).length;
+
+                    const complianceCount = totalValid - violations;
+                    const percentage = (complianceCount / totalValid) * 100;
+                    const isTargetMet = percentage >= 99; // Target 99%
+
+                    return (
+                      <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                        isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                      )}>
+                        <div className="flex justify-between items-center">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                            <span className="text-[10px] text-slate-500">{complianceCount} su {totalValid} OK</span>
+                            <span className="text-[9px] text-slate-600 mt-0.5">({violations} violazioni)</span>
+                          </div>
+                          <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                            {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  if (baseLdsData.length === 0) return <div className="text-slate-500 italic text-sm w-full">Nessun intervento chiuso nel mese corrente con dati SLA.</div>;
+
+                  return (
+                    <div className="flex flex-col lg:flex-row gap-8 justify-center">
+
+                      {/* COLUMN 1: Complessivo */}
+                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 w-full text-left flex items-center justify-between">
+                          Complessivo <span className="text-[10px] opacity-70">(Target 90%)</span>
+                        </h4>
+                        {renderCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
+                        {renderCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
+                      </div>
+
+                      {/* COLUMN 2: Controllo */}
+                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
+                          Controllo <span className="text-[10px] opacity-70">(&le; 2640 min)</span>
+                        </h4>
+                        {renderControlloCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
+                        {renderControlloCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
+                      </div>
+
+                      {/* COLUMN 3: Regionale (New - Phase 34) */}
+                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
+                          Regionale <span className="text-[10px] opacity-70">(% Regioni OK)</span>
+                        </h4>
+                        {/* Calculate Regionale Logic Here:
+                            1. Group by Region
+                            2. Calculate Complessivo (Target 80%)
+                            3. Count passing regions
+                        */}
+                        {(() => {
+                          const regions = [...new Set(baseLdsData.map(i => i.regione || 'N/D'))];
+                          const totalRegions = regions.length;
+
+                          const renderRegionaleCard = (title: string, service: string) => {
+                            if (totalRegions === 0) return null;
+                            let passingRegions = 0;
+
+                            regions.forEach(reg => {
+                              const regionSubset = baseLdsData.filter(i => (i.regione || 'N/D') === reg && (i.servizio_hd || '').trim().toUpperCase() === service);
+                              const si = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                              const no = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                              const total = si + no;
+
+                              // If no tickets for this service in this region, does it pass? 
+                              // Assuming N/A doesn't count against, but also doesn't count for? 
+                              // Let's assume we only count regions with ACTIVE tickets for this service.
+                              if (total > 0) {
+                                const pct = (si / total) * 100;
+                                if (pct >= 80) passingRegions++;
+                              } else {
+                                // Empty region counts as Pass
+                                passingRegions++;
+                              }
+                            });
+
+                            // Denominator: Total Regions (since Empty = Pass logic applies to all)
+                            const denom = totalRegions;
+
+                            // If totalRegions is 0 (no data at all in file), handle gracefully
+                            if (denom === 0) return (
+                              <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                                <span className="text-sm text-slate-600 italic">Nessun dato regionale</span>
+                              </div>
+                            );
+
+                            const pct = (passingRegions / denom) * 100;
+                            const isTargetMet = pct >= 100;
+
+                            return (
+                              <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                                isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                              )}>
+                                <div className="flex justify-between items-center">
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                                    <span className="text-[10px] text-slate-500">{passingRegions} su {denom} Regioni OK</span>
+                                  </div>
+                                  <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                                    {pct === 100 ? '100%' : pct.toFixed(0) + '%'}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          };
+
+                          return (
+                            <>
+                              {renderRegionaleCard("Filiali (TECNOFIL)", 'TECNOFIL')}
+                              {renderRegionaleCard("Presidi (TECNODIR)", 'TECNODIR')}
+                            </>
+                          );
+                        })()}
+                      </div>
+
+                    </div>
+                  );
+                })()}
               </div>
             </div>
+
+            {/* NEW SECTION: Livelli di Servizio - Regioni & Mappa (Phase 35) */}
+            <div className="flex flex-col xl:flex-row gap-6 mb-8">
+              {/* Table Section */}
+              <div className="flex-1 xl:max-w-[66%] xl:flex-[2]">
+                <RegionalSLATable stats={regionalStats} />
+              </div>
+
+              {/* Map Section */}
+              <div className="flex-1 glass-card p-4 flex flex-col min-h-[500px] xl:max-w-[34%] xl:flex-[1]">
+                <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/5">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
+                    Distribuzione Geografica
+                  </h3>
+                  <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/5">
+                    <button
+                      onClick={() => setMapMode('SLA')}
+                      className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                        mapMode === 'SLA' ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      SLA Status
+                    </button>
+                    <button
+                      onClick={() => setMapMode('BACKLOG')}
+                      className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                        mapMode === 'BACKLOG' ? "bg-amber-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                      )}
+                    >
+                      Backlog (Vol)
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 relative">
+                  <ItalyMap data={regionalStats} mode={mapMode} />
+                </div>
+                <div className="mt-4 flex gap-4 justify-center text-[10px] text-slate-500 font-mono">
+                  {mapMode === 'SLA' ? (
+                    <>
+                      <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Target Raggiunto</div>
+                      <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Sotto Soglia</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1 bg-gradient-to-r from-cyan-900 to-cyan-400 w-24 h-2 rounded opacity-80"></div> Volume
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+
           </>
         )}
 
@@ -2175,9 +2684,9 @@ function App() {
 
       {/* Root Level Modal */}
       {selectedIncident && <IncidentDetailModal incident={selectedIncident} onClose={() => setSelectedIncident(null)} onIncidentUpdate={handleIncidentUpdate} />}
-    </div>
+    </div >
   );
 }
 
-export default App;
 
+export default App;
