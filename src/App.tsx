@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -53,6 +53,7 @@ interface Incident {
   data_consegna?: string;
   gruppo_assegnazione?: string; // EUS_LOCKER_LASER_MICROINF_INC or EUS_LASER_MICROINF_INC
   fornitore?: string;
+  ora_violazione?: string; // Date of SLA violation
   [key: string]: any; // Allow dynamic access
 }
 
@@ -72,6 +73,29 @@ const formatDate = (dateString?: string) => {
   return new Date(dateString).toLocaleDateString('it-IT', {
     day: '2-digit', month: '2-digit', year: 'numeric'
   });
+};
+
+const getWorkingDaysDiff = (startDateStr?: string, endDate: Date = new Date()) => {
+  if (!startDateStr) return 0;
+  const start = new Date(startDateStr);
+  if (isNaN(start.getTime())) return 0;
+
+  // Clone to avoid modifying original
+  let current = new Date(start);
+  current.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+
+  let count = 0;
+  while (current < end) {
+    // 0 = Sunday, 6 = Saturday
+    const day = current.getDay();
+    if (day !== 0 && day !== 6) {
+      count++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
 };
 
 const cn = (...classes: (string | undefined | null | false)[]) => {
@@ -259,78 +283,78 @@ const KPICards = ({ stats, selectedStatus, onStatusSelect }: { stats: any, selec
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
       <div
         onClick={() => onStatusSelect(selectedStatus === 'Backlog' ? null : 'Backlog')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Backlog'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Backlog'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <Clock size={48} className="text-white" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <Clock size={40} className="text-white" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">Backlog Totale</p>
-        <h3 className="text-3xl font-bold text-white mb-1">{stats.open + stats.suspended}</h3>
-        <p className="text-xs text-slate-500">In Lavorazione + Sospesi</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Backlog Totale</p>
+        <h3 className="text-2xl font-bold text-white mb-0.5">{stats.open + stats.suspended}</h3>
+        <p className="text-[10px] text-slate-500">In Lavorazione + Sospesi</p>
       </div>
 
       <div
         onClick={() => onStatusSelect('In Lavorazione')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('In Lavorazione'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('In Lavorazione'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <LayoutDashboard size={48} className="text-purple-400" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <LayoutDashboard size={40} className="text-purple-400" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">In Lavorazione</p>
-        <h3 className="text-3xl font-bold text-purple-400 mb-1">{stats.open}</h3>
-        <p className="text-xs text-purple-500/60">Ticket Attivi</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">In Lavorazione</p>
+        <h3 className="text-2xl font-bold text-purple-400 mb-0.5">{stats.open}</h3>
+        <p className="text-[10px] text-purple-500/60">Ticket Attivi</p>
       </div>
 
       <div
         onClick={() => onStatusSelect('Sospesi')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Sospesi'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Sospesi'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <Clock size={48} className="text-yellow-400" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <Clock size={40} className="text-yellow-400" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">Sospesi</p>
-        <h3 className="text-3xl font-bold text-yellow-400 mb-1">{stats.suspended}</h3>
-        <p className="text-xs text-yellow-500/60">In Attesa</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Sospesi</p>
+        <h3 className="text-2xl font-bold text-yellow-400 mb-0.5">{stats.suspended}</h3>
+        <p className="text-[10px] text-yellow-500/60">In Attesa</p>
       </div>
 
-      {/* Aperti Oggi - MOVED AFTER SOSPESI */}
+      {/* Aperti Oggi */}
       <div
         onClick={() => onStatusSelect('Aperti Oggi')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Aperti Oggi'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Aperti Oggi'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <CheckCircle size={48} className="text-sky-400" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <CheckCircle size={40} className="text-sky-400" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">Aperti Oggi</p>
-        <h3 className="text-3xl font-bold text-sky-400 mb-1">{stats.openedToday}</h3>
-        <p className="text-xs text-sky-500/60">Nuovi Ticket</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Aperti Oggi</p>
+        <h3 className="text-2xl font-bold text-sky-400 mb-0.5">{stats.openedToday}</h3>
+        <p className="text-[10px] text-sky-500/60">Nuovi Ticket</p>
       </div>
 
       <div
         onClick={() => onStatusSelect('Chiusi Oggi')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Chiusi Oggi'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Chiusi Oggi'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <CheckCircle size={48} className="text-emerald-400" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <CheckCircle size={40} className="text-emerald-400" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">Chiusi Oggi</p>
-        <h3 className="text-3xl font-bold text-emerald-400 mb-1">{stats.closedToday}</h3>
-        <p className="text-xs text-emerald-500/60">Risolti in giornata</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Chiusi Oggi</p>
+        <h3 className="text-2xl font-bold text-emerald-400 mb-0.5">{stats.closedToday}</h3>
+        <p className="text-[10px] text-emerald-500/60">Risolti in giornata</p>
       </div>
 
       <div
         onClick={() => onStatusSelect('Violazioni SLA')}
-        className={cn("glass-card p-6 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Violazioni SLA'))}
+        className={cn("glass-card p-4 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Violazioni SLA'))}
       >
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <AlertTriangle size={48} className="text-red-500" />
+        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+          <AlertTriangle size={40} className="text-red-500" />
         </div>
-        <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-1">Violazioni SLA</p>
-        <h3 className="text-3xl font-bold text-red-500 mb-1">{stats.slaBreach}</h3>
-        <p className="text-xs text-red-500/60">Attenzione Richiesta</p>
+        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider mb-1">Violazioni SLA</p>
+        <h3 className="text-2xl font-bold text-red-500 mb-0.5">{stats.slaBreach}</h3>
+        <p className="text-[10px] text-red-500/60">Attenzione Richiesta</p>
       </div>
     </div>
   );
@@ -1677,7 +1701,20 @@ const PartsRequestTable = ({ data, onSelect }: { data: Incident[], onSelect: (in
   );
 };
 
-const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?: (updated: Incident) => void, onSelect: (inc: Incident) => void }) => {
+const IncidentTable = ({
+  data,
+  onSelect,
+  insightData,
+  onSelectInsight,
+  selectedInsight
+}: {
+  data: Incident[],
+  onIncidentUpdate?: (updated: Incident) => void,
+  onSelect: (inc: Incident) => void,
+  insightData: Incident[],
+  onSelectInsight: (ruleId: string | null) => void,
+  selectedInsight: string | null
+}) => {
   const [filter, setFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'in_lavorazione' | 'sospesi' | 'chiusi' | 'violazioni'>('tutti');
   const [page, setPage] = useState(1);
@@ -1727,6 +1764,14 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
     else if (statusFilter === 'chiusi') res = res.filter(i => ['Chiuso', 'Closed'].includes(i.stato || ''));
     else if (statusFilter === 'violazioni') res = res.filter(i => isSlaBreach(i.violazione_avvenuta));
 
+    // Insight Filter (Specific to this Table, Phase 59)
+    if (selectedInsight) {
+      const rule = INSIGHT_RULES.find(r => r.id === selectedInsight);
+      if (rule) {
+        res = res.filter(rule.check);
+      }
+    }
+
     if (!filter) return sortConfig ? sortData(res, sortConfig) : res;
     const lower = filter.toLowerCase();
     const filtered = res.filter(i =>
@@ -1736,7 +1781,7 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
       (i.item && i.item.toLowerCase().includes(lower))
     );
     return sortConfig ? sortData(filtered, sortConfig) : filtered;
-  }, [data, filter, statusFilter, sortConfig]);
+  }, [data, filter, statusFilter, sortConfig, selectedInsight]);
 
   useEffect(() => { setPage(1); }, [filter, statusFilter]);
 
@@ -1756,9 +1801,8 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
 
   return (
     <div className="glass-card p-6">
-      {/* ... (Header/Filters remain same) ... */}
       {/* Filters Cards */}
-      <div className="grid grid-cols-6 gap-2 mb-6 w-full">
+      <div className="grid grid-cols-6 gap-2 mb-4 w-full">
         <div
           onClick={() => setStatusFilter('tutti')}
           className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'tutti' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
@@ -1812,12 +1856,22 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
           <h3 className="text-lg md:text-xl font-bold text-red-500 leading-tight">{stats.sla_breach}</h3>
         </div>
       </div>
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+
+      {/* NEW: Compact Insight Panel (Phase 58) */}
+      <InsightPanel data={insightData} onSelectRule={onSelectInsight} selectedRule={selectedInsight} compact={true} />
+
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mt-6">
         <div className="relative w-full md:w-1/3">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Search size={16} className="text-slate-400" /></div>
           <input type="text" className="bg-slate-900/50 border border-white/10 text-white text-sm rounded-xl focus:ring-blue-500/50 focus:border-blue-500/50 block w-full pl-10 p-3 placeholder-slate-500 backdrop-blur-sm transition-all" placeholder="Cerca..." value={filter} onChange={e => setFilter(e.target.value)} />
         </div>
-        <button onClick={exportCSV} className="flex items-center px-4 py-2.5 text-sm font-medium text-white bg-emerald-600/80 hover:bg-emerald-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/20 backdrop-blur-sm"><Download size={16} className="mr-2" /> Export XLSX</button>
+        <button
+          onClick={exportCSV}
+          className="p-3 bg-emerald-600/80 hover:bg-emerald-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/20 backdrop-blur-sm group"
+          title="Export XLSX"
+        >
+          <Download size={18} className="text-white group-hover:scale-110 transition-transform" />
+        </button>
       </div>
 
 
@@ -2567,9 +2621,242 @@ const UserEditModal = ({ user, onClose, onSave }: { user: UserProfile, onClose: 
   );
 };
 
+// --- Insight System ---
+type InsightLevel = 'danger' | 'warning' | 'info';
+
+interface InsightRule {
+  id: string;
+  name: string;
+  type: InsightLevel;
+  check: (incident: Incident) => boolean;
+  message: (count: number) => string;
+  icon: React.ElementType;
+}
+
+const INSIGHT_RULES: InsightRule[] = [
+  {
+    id: 'keyword_cassa',
+    name: 'Cassa',
+    type: 'danger',
+    icon: AlertTriangle,
+    check: (i) => {
+      // Exclude closed
+      if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+      const text = (i.breve_descrizione || '' + i.descrizione || '').toLowerCase();
+      // "Cassa", "casse", "cassunica"
+      return /cass[ae]|cassunica/i.test(text);
+    },
+    message: (c) => `${c}`
+  },
+  {
+    id: 'lamentele',
+    name: 'Lamentele',
+    type: 'warning',
+    icon: Lightbulb,
+    check: (i) => {
+      // Exclude closed
+      if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+      const text = (i.breve_descrizione || '' + i.descrizione || '');
+      // Exclamations, Uppercase emphasis (heuristic: simplified check for "!!!" or "URGENTE")
+      // User asked for "esclamazioni, maiuscolo, punti esclamativi"
+      return text.includes('!!!') || text.includes('URGENTE') || /[A-Z]{5,}/.test(text);
+    },
+    message: (c) => `${c}`
+  },
+  {
+    id: 'sla_risk_44',
+    name: 'Rischio SLA44',
+    type: 'danger',
+    icon: AlertCircle,
+    check: (i) => {
+      if (!i.ora_violazione) return false;
+      // Check if open (not closed)
+      if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+      return getWorkingDaysDiff(i.ora_violazione) >= 2;
+    },
+    message: (c) => `${c}`
+  }
+];
+
+const InsightPanel = ({ data, onSelectRule, selectedRule, compact = false }: { data: Incident[], onSelectRule: (ruleId: string | null) => void, selectedRule: string | null, compact?: boolean }) => {
+  const activeInsights = useMemo(() => {
+    return INSIGHT_RULES.map(rule => {
+      const count = data.filter(rule.check).length;
+      return { ...rule, count };
+    }).filter(r => r.count > 0);
+  }, [data]);
+
+  if (activeInsights.length === 0) return null;
+
+  return (
+    <div className={cn("grid gap-3 mb-4 animate-in slide-in-from-top-4 duration-500", compact ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-6" : "grid-cols-2 md:grid-cols-4 lg:grid-cols-6")}>
+      {activeInsights.map(insight => (
+        <div
+          key={insight.id}
+          onClick={() => onSelectRule(selectedRule === insight.id ? null : insight.id)}
+          className={cn(
+            "relative overflow-hidden cursor-pointer transition-all duration-300 rounded-lg border backdrop-blur-md group select-none flex items-center justify-between",
+            compact ? "p-2 h-[42px]" : "p-3",
+            selectedRule === insight.id ? "scale-105 shadow-xl ring-2" : "hover:scale-[1.02]",
+            insight.type === 'danger'
+              ? (selectedRule === insight.id ? "bg-red-500/20 border-red-500 ring-red-400" : "bg-red-500/10 border-red-500/30 hover:bg-red-500/20")
+              : (selectedRule === insight.id ? "bg-amber-500/20 border-amber-500 ring-amber-400" : "bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20")
+          )}
+        >
+          {compact ? (
+            // Compact Layout: Single Line (Icon | Title: Count) OR (Title Count | Icon) ? User asked "totale incident e titolo su una sola riga".
+            // Let's do: Title (Left) .... Count (Right) or Title (Count)
+            // Proposed: Icon (Left) Title (Left) ... Count (Right)
+            <>
+              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                <div className={cn("rounded-full p-1 shrink-0", insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400")}>
+                  <insight.icon size={14} />
+                </div>
+                <span className={cn("text-xs font-bold uppercase truncate", insight.type === 'danger' ? "text-red-400" : "text-amber-400")}>{insight.name}</span>
+              </div>
+              <span className={cn("text-sm font-bold ml-2", insight.type === 'danger' ? "text-red-100" : "text-amber-100")}>{insight.count}</span>
+            </>
+          ) : (
+            // Standard Layout (Already Refined)
+            <>
+              <div className="flex items-center justify-between gap-2 w-full">
+                <div className="min-w-0">
+                  <h3 className={cn("text-xl font-bold leading-none truncate mb-1",
+                    insight.type === 'danger' ? "text-red-100" : "text-amber-100"
+                  )}>
+                    {insight.message(insight.count)}
+                  </h3>
+                  <p className={cn("text-[10px] font-bold uppercase tracking-wider truncate",
+                    insight.type === 'danger' ? "text-red-400" : "text-amber-400"
+                  )}>
+                    {insight.name}
+                  </p>
+                </div>
+                <div className={cn("p-2 rounded-lg shrink-0",
+                  insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
+                )}>
+                  <insight.icon size={18} />
+                </div>
+              </div>
+              <div className="absolute bottom-0 left-0 h-0.5 bg-current opacity-20 w-full" />
+              <div className={cn("absolute bottom-0 left-0 h-0.5 transition-all duration-1000",
+                insight.type === 'danger' ? "bg-red-500" : "bg-amber-500"
+              )} style={{ width: '100%' }} />
+            </>
+          )}
+
+          {!compact && (
+            <>
+              {/* Progress Bar / Indicator for Standard Mode (Already included in fragment above? No, I split it logic-wise) -> Wait, logic above separates content. Progress bar can stay for both or just standard. Let's keep specific style for compact. */}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const InsightListModal = ({
+  data,
+  rule,
+  onClose,
+  onSelectIncident
+}: {
+  data: Incident[],
+  rule: InsightRule,
+  onClose: () => void,
+  onSelectIncident: (incident: Incident) => void
+}) => {
+  return (
+    <div className="fixed inset-0 z-[40] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+
+        {/* Header */}
+        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-800/50">
+          <div className="flex items-center gap-3">
+            <div className={cn("p-2 rounded-lg",
+              rule.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
+            )}>
+              <rule.icon size={20} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Dettaglio Insight</h2>
+              <p className={cn("text-sm font-semibold", rule.type === 'danger' ? "text-red-400" : "text-amber-400")}>
+                {rule.name} • {data.length} Incidenti
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Insight_Data");
+                XLSX.writeFile(wb, `Insight_${rule.name.replace(/ /g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+              }}
+              className="p-2 hover:bg-emerald-500/20 rounded-lg text-emerald-400 hover:text-emerald-300 transition-colors"
+              title="Esporta Excel"
+            >
+              <Download size={20} />
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-auto p-0">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-slate-800/80 sticky top-0 z-10 backdrop-blur-md">
+              <tr>
+                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Numero</th>
+                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Regione</th>
+                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item / Modello</th>
+                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pianificazione</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {data.map(incident => (
+                <tr
+                  key={incident.numero}
+                  onClick={() => onSelectIncident(incident)}
+                  className="hover:bg-white/5 transition-colors cursor-pointer group"
+                >
+                  <td className="p-2 text-sm font-mono text-blue-400 font-bold group-hover:underline">{incident.numero}</td>
+                  <td className="p-2 text-sm text-slate-300">{incident.regione || '-'}</td>
+                  <td className="p-2 text-sm text-slate-300">
+                    <div className="flex flex-col">
+                      <span className="font-semibold">{incident.item || incident.category || '-'}</span>
+                      <span className="text-xs text-slate-500">{incident.modello || '-'}</span>
+                    </div>
+                  </td>
+                  <td className="p-2 text-sm text-slate-300">
+                    {incident.pianificazione ? (
+                      <span className="flex items-center gap-1.5 text-emerald-400">
+                        <CalendarPlus size={14} /> {formatDate(incident.pianificazione)}
+                      </span>
+                    ) : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- App Main ---
 
+
+
 function App() {
+  // Insight System (Phase 51)
+  const [selectedInsightRule, setSelectedInsightRule] = useState<string | null>(null);
+  const [showInsightModal, setShowInsightModal] = useState(false);
+
   const [session, setSession] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [view, setView] = useState<ViewMode>('dashboard');
@@ -2737,8 +3024,29 @@ function App() {
       data = data.filter(i => i.fornitore === selectedSupplier);
     }
 
+    // Region Filter (Added Phase 57b)
+    if (selectedRegion) {
+      data = data.filter(i => i.regione === selectedRegion);
+    }
+
     return data;
-  }, [incidents, selectedStatus, selectedSupplier]);
+
+
+
+    return data;
+  }, [incidents, selectedStatus, selectedSupplier, selectedRegion]);
+
+  // Insight Filtered Data (Specific for Tables)
+  const insightFilteredData = useMemo(() => {
+    let data = dashboardData;
+    if (selectedInsightRule) {
+      const rule = INSIGHT_RULES.find(r => r.id === selectedInsightRule);
+      if (rule) {
+        data = data.filter(rule.check);
+      }
+    }
+    return data;
+  }, [dashboardData, selectedInsightRule]);
 
   /* const fullyFilteredData = useMemo(() => {
     if (!selectedRegion) return dashboardData;
@@ -2926,6 +3234,19 @@ function App() {
             )}
 
             <KPICards stats={stats} selectedStatus={selectedStatus} onStatusSelect={setSelectedStatus} />
+
+            {/* Insight System (Phase 51) - Updated to Compact (Phase 60) */}
+            <InsightPanel
+              data={dashboardData}
+              onSelectRule={(ruleId) => {
+                setSelectedInsightRule(ruleId);
+                if (ruleId) setShowInsightModal(true);
+              }}
+              selectedRule={selectedInsightRule}
+              compact={true}
+            />
+
+
 
             {/* Supplier Filter Cards (Phase 36) */}
             <div className="flex flex-wrap gap-2 mb-8">
@@ -3238,7 +3559,19 @@ function App() {
           </>
         )}
 
-        {view === 'incidents' && <IncidentTable data={incidents} onIncidentUpdate={handleIncidentUpdate} onSelect={setSelectedIncident} />}
+        {view === 'incidents' && (
+          <IncidentTable
+            data={incidents}
+            onIncidentUpdate={handleIncidentUpdate}
+            onSelect={setSelectedIncident}
+            insightData={dashboardData}
+            onSelectInsight={(ruleId) => {
+              setSelectedInsightRule(ruleId);
+              // In this view, we FILTER the table, we DO NOT open the modal (Phase 59)
+            }}
+            selectedInsight={selectedInsightRule}
+          />
+        )}
 
         {view === 'requests' && <PartsRequestTable data={incidents} onSelect={setSelectedIncident} />}
 
@@ -3249,6 +3582,19 @@ function App() {
 
       {/* Root Level Modal */}
       {selectedIncident && <IncidentDetailModal incident={selectedIncident} onClose={() => setSelectedIncident(null)} onIncidentUpdate={handleIncidentUpdate} user={userProfile} />}
+
+      {/* Insight List Modal (Phase 53) */}
+      {showInsightModal && selectedInsightRule && (
+        <InsightListModal
+          data={insightFilteredData}
+          rule={INSIGHT_RULES.find(r => r.id === selectedInsightRule)!}
+          onClose={() => { setShowInsightModal(false); setSelectedInsightRule(null); }}
+          onSelectIncident={(incident) => {
+            // setShowInsightModal(false); // STACKING: Keep List open behind Detail
+            setSelectedIncident(incident);
+          }}
+        />
+      )}
     </div >
   );
 }
