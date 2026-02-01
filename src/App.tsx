@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, Hexagon, ShieldCheck, History } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -154,9 +154,13 @@ const Sidebar = ({
     )}>
       <div className="h-full px-3 py-4 overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between mb-8 pl-2 mt-2">
-          <span className="self-center text-xl font-bold whitespace-nowrap text-slate-900 dark:text-white tracking-wide text-glow">
-            ASTRAL EAGLE
-          </span>
+          <div className="flex items-center px-4 py-2">
+            <img
+              src="/mvs_logo.png"
+              alt="MVS Logo"
+              className="h-10 w-auto object-contain"
+            />
+          </div>
           <button onClick={toggleSidebar} className="lg:hidden text-slate-400 hover:text-white">
             <X size={24} />
           </button>
@@ -1706,14 +1710,16 @@ const IncidentTable = ({
   onSelect,
   insightData,
   onSelectInsight,
-  selectedInsight
+  selectedInsight,
+  insightRules = INSIGHT_RULES // Default for retro compatibility or safety
 }: {
   data: Incident[],
   onIncidentUpdate?: (updated: Incident) => void,
   onSelect: (inc: Incident) => void,
   insightData: Incident[],
   onSelectInsight: (ruleId: string | null) => void,
-  selectedInsight: string | null
+  selectedInsight: string | null,
+  insightRules?: InsightRule[]
 }) => {
   const [filter, setFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'in_lavorazione' | 'sospesi' | 'chiusi' | 'violazioni'>('tutti');
@@ -1766,7 +1772,7 @@ const IncidentTable = ({
 
     // Insight Filter (Specific to this Table, Phase 59)
     if (selectedInsight) {
-      const rule = INSIGHT_RULES.find(r => r.id === selectedInsight);
+      const rule = insightRules.find(r => r.id === selectedInsight);
       if (rule) {
         res = res.filter(rule.check);
       }
@@ -1858,7 +1864,7 @@ const IncidentTable = ({
       </div>
 
       {/* NEW: Compact Insight Panel (Phase 58) */}
-      <InsightPanel data={insightData} onSelectRule={onSelectInsight} selectedRule={selectedInsight} compact={true} />
+      <InsightPanel data={insightData} onSelectRule={onSelectInsight} selectedRule={selectedInsight} compact={true} rules={insightRules} />
 
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mt-6">
         <div className="relative w-full md:w-1/3">
@@ -2678,81 +2684,84 @@ const INSIGHT_RULES: InsightRule[] = [
   }
 ];
 
-const InsightPanel = ({ data, onSelectRule, selectedRule, compact = false }: { data: Incident[], onSelectRule: (ruleId: string | null) => void, selectedRule: string | null, compact?: boolean }) => {
+const InsightPanel = ({ data, onSelectRule, selectedRule, compact = false, rules, showTitle = true }: { data: Incident[], onSelectRule: (ruleId: string | null) => void, selectedRule: string | null, compact?: boolean, rules: InsightRule[], showTitle?: boolean }) => {
   const activeInsights = useMemo(() => {
-    return INSIGHT_RULES.map(rule => {
+    return rules.map(rule => {
       const count = data.filter(rule.check).length;
       return { ...rule, count };
     }).filter(r => r.count > 0);
-  }, [data]);
+  }, [data, rules]);
 
   if (activeInsights.length === 0) return null;
 
   return (
-    <div className={cn("grid gap-3 mb-4 animate-in slide-in-from-top-4 duration-500", compact ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-6" : "grid-cols-2 md:grid-cols-4 lg:grid-cols-6")}>
-      {activeInsights.map(insight => (
-        <div
-          key={insight.id}
-          onClick={() => onSelectRule(selectedRule === insight.id ? null : insight.id)}
-          className={cn(
-            "relative overflow-hidden cursor-pointer transition-all duration-300 rounded-lg border backdrop-blur-md group select-none flex items-center justify-between",
-            compact ? "p-2 h-[42px]" : "p-3",
-            selectedRule === insight.id ? "scale-105 shadow-xl ring-2" : "hover:scale-[1.02]",
-            insight.type === 'danger'
-              ? (selectedRule === insight.id ? "bg-red-500/20 border-red-500 ring-red-400" : "bg-red-500/10 border-red-500/30 hover:bg-red-500/20")
-              : (selectedRule === insight.id ? "bg-amber-500/20 border-amber-500 ring-amber-400" : "bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20")
-          )}
-        >
-          {compact ? (
-            // Compact Layout: Single Line (Icon | Title: Count) OR (Title Count | Icon) ? User asked "totale incident e titolo su una sola riga".
-            // Let's do: Title (Left) .... Count (Right) or Title (Count)
-            // Proposed: Icon (Left) Title (Left) ... Count (Right)
-            <>
-              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                <div className={cn("rounded-full p-1 shrink-0", insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400")}>
-                  <insight.icon size={14} />
+    <>
+      {showTitle && !compact && <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2"><Lightbulb className="text-yellow-400" /> Insights & Suggerimenti</h3>}
+      <div className={cn("grid gap-3 mb-4 animate-in slide-in-from-top-4 duration-500", compact ? "grid-cols-2 md:grid-cols-4 lg:grid-cols-6" : "grid-cols-2 md:grid-cols-4 lg:grid-cols-6")}>
+        {activeInsights.map(insight => (
+          <div
+            key={insight.id}
+            onClick={() => onSelectRule(selectedRule === insight.id ? null : insight.id)}
+            className={cn(
+              "relative overflow-hidden cursor-pointer transition-all duration-300 rounded-lg border backdrop-blur-md group select-none flex items-center justify-between",
+              compact ? "p-2 h-[42px]" : "p-3",
+              selectedRule === insight.id ? "scale-105 shadow-xl ring-2" : "hover:scale-[1.02]",
+              insight.type === 'danger'
+                ? (selectedRule === insight.id ? "bg-red-500/20 border-red-500 ring-red-400" : "bg-red-500/10 border-red-500/30 hover:bg-red-500/20")
+                : (selectedRule === insight.id ? "bg-amber-500/20 border-amber-500 ring-amber-400" : "bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20")
+            )}
+          >
+            {compact ? (
+              // Compact Layout: Single Line (Icon | Title: Count) OR (Title Count | Icon) ? User asked "totale incident e titolo su una sola riga".
+              // Let's do: Title (Left) .... Count (Right) or Title (Count)
+              // Proposed: Icon (Left) Title (Left) ... Count (Right)
+              <>
+                <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                  <div className={cn("rounded-full p-1 shrink-0", insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400")}>
+                    <insight.icon size={14} />
+                  </div>
+                  <span className={cn("text-xs font-bold uppercase truncate", insight.type === 'danger' ? "text-red-400" : "text-amber-400")}>{insight.name}</span>
                 </div>
-                <span className={cn("text-xs font-bold uppercase truncate", insight.type === 'danger' ? "text-red-400" : "text-amber-400")}>{insight.name}</span>
-              </div>
-              <span className={cn("text-sm font-bold ml-2", insight.type === 'danger' ? "text-red-100" : "text-amber-100")}>{insight.count}</span>
-            </>
-          ) : (
-            // Standard Layout (Already Refined)
-            <>
-              <div className="flex items-center justify-between gap-2 w-full">
-                <div className="min-w-0">
-                  <h3 className={cn("text-xl font-bold leading-none truncate mb-1",
-                    insight.type === 'danger' ? "text-red-100" : "text-amber-100"
+                <span className={cn("text-sm font-bold ml-2", insight.type === 'danger' ? "text-red-100" : "text-amber-100")}>{insight.count}</span>
+              </>
+            ) : (
+              // Standard Layout (Already Refined)
+              <>
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <div className="min-w-0">
+                    <h3 className={cn("text-xl font-bold leading-none truncate mb-1",
+                      insight.type === 'danger' ? "text-red-100" : "text-amber-100"
+                    )}>
+                      {insight.message(insight.count)}
+                    </h3>
+                    <p className={cn("text-[10px] font-bold uppercase tracking-wider truncate",
+                      insight.type === 'danger' ? "text-red-400" : "text-amber-400"
+                    )}>
+                      {insight.name}
+                    </p>
+                  </div>
+                  <div className={cn("p-2 rounded-lg shrink-0",
+                    insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
                   )}>
-                    {insight.message(insight.count)}
-                  </h3>
-                  <p className={cn("text-[10px] font-bold uppercase tracking-wider truncate",
-                    insight.type === 'danger' ? "text-red-400" : "text-amber-400"
-                  )}>
-                    {insight.name}
-                  </p>
+                    <insight.icon size={18} />
+                  </div>
                 </div>
-                <div className={cn("p-2 rounded-lg shrink-0",
-                  insight.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
-                )}>
-                  <insight.icon size={18} />
-                </div>
-              </div>
-              <div className="absolute bottom-0 left-0 h-0.5 bg-current opacity-20 w-full" />
-              <div className={cn("absolute bottom-0 left-0 h-0.5 transition-all duration-1000",
-                insight.type === 'danger' ? "bg-red-500" : "bg-amber-500"
-              )} style={{ width: '100%' }} />
-            </>
-          )}
+                <div className="absolute bottom-0 left-0 h-0.5 bg-current opacity-20 w-full" />
+                <div className={cn("absolute bottom-0 left-0 h-0.5 transition-all duration-1000",
+                  insight.type === 'danger' ? "bg-red-500" : "bg-amber-500"
+                )} style={{ width: '100%' }} />
+              </>
+            )}
 
-          {!compact && (
-            <>
-              {/* Progress Bar / Indicator for Standard Mode (Already included in fragment above? No, I split it logic-wise) -> Wait, logic above separates content. Progress bar can stay for both or just standard. Let's keep specific style for compact. */}
-            </>
-          )}
-        </div>
-      ))}
-    </div>
+            {!compact && (
+              <>
+                {/* Progress Bar / Indicator for Standard Mode (Already included in fragment above? No, I split it logic-wise) -> Wait, logic above separates content. Progress bar can stay for both or just standard. Let's keep specific style for compact. */}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 };
 
@@ -2998,6 +3007,64 @@ function App() {
   };
 
   // Filter Data Globally
+  // --- Insight Logic: Repeated Assets ---
+  const repeatedAssets = useMemo(() => {
+    const map = new Map<string, number[]>();
+    const repeated = new Set<string>();
+
+    // 1. Group dates by Asset
+    incidents.forEach(i => {
+      if (!i.asset) return;
+      const asset = i.asset.trim().toUpperCase();
+      // Use data_apertura or created_at
+      const dateStr = i.data_apertura || i.created_at;
+      if (!dateStr) return;
+      const time = new Date(dateStr).getTime();
+      if (isNaN(time)) return;
+
+      if (!map.has(asset)) map.set(asset, []);
+      map.get(asset)!.push(time);
+    });
+
+    // 2. Check for repetitions within 30 days
+    map.forEach((dates, asset) => {
+      if (dates.length < 2) return;
+      dates.sort((a, b) => a - b);
+
+      for (let i = 1; i < dates.length; i++) {
+        const diffMs = dates[i] - dates[i - 1];
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        if (diffDays <= 30) {
+          repeated.add(asset);
+          break; // Found a repetition, mark asset
+        }
+      }
+    });
+
+    return repeated;
+  }, [incidents]);
+
+  // --- Construct Dynamic Rules ---
+  const allInsightRules = useMemo(() => {
+    const rules = [...INSIGHT_RULES];
+    if (repeatedAssets.size > 0) {
+      rules.push({
+        id: 'repeated_asset',
+        name: 'Recidivi',
+        type: 'warning',
+        icon: History,
+        // Only show OPEN tickets that are part of a repetition chain
+        check: (i) => {
+          if (!i.asset) return false;
+          if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+          return repeatedAssets.has(String(i.asset).trim().toUpperCase());
+        },
+        message: (c) => `${c}`
+      });
+    }
+    return rules;
+  }, [repeatedAssets]);
+
   const dashboardData = useMemo(() => {
     let data = incidents;
 
@@ -3088,6 +3155,8 @@ function App() {
 
   // NEW: State for Map Mode
   const [mapMode, setMapMode] = useState<'SLA' | 'BACKLOG'>('SLA');
+  // NEW: State for SLA History (Phase 63)
+  const [slaDate, setSlaDate] = useState(new Date());
 
   // Extract unique Suppliers for Filter UI
   const supplierList = useMemo(() => {
@@ -3101,20 +3170,12 @@ function App() {
   // NEW: Calculate Regional Stats for Table AND Map (Lifted Logic)
   const regionalStats = useMemo(() => {
     const data = dashboardData || []; // Use currently available data
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const currentMonth = slaDate.getMonth();
+    const currentYear = slaDate.getFullYear();
 
-    // Base Filter: Has in_sla AND Closed in Current Month
-    // Note: This logic MATCHES the one previously inside RegionalSLATable
-    const filtered = data.filter(i => {
-      if (!i || !i.in_sla || !i.data_chiusura) return false;
-      try {
-        const d = new Date(i.data_chiusura);
-        if (isNaN(d.getTime())) return false;
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      } catch (e) { return false; }
-    });
+    // Base Filter: Has in_sla
+    // Fix Phase 61: Do NOT filter entire dataset by date. Backlog needs all active tickets.
+    // SLA stats need closed in current month.
 
     const map = new Map<string, {
       region: string;
@@ -3122,9 +3183,11 @@ function App() {
       pres_si: number; pres_tot: number;
       fil_ctrl_viol: number; fil_ctrl_tot: number;
       pres_ctrl_viol: number; pres_ctrl_tot: number;
+      backlog: number; // Added for Map
+      sla_breach: number; // Added for Map
     }>();
 
-    filtered.forEach(i => {
+    data.forEach(i => {
       const region = i.regione || 'N/D';
       if (!map.has(region)) {
         map.set(region, {
@@ -3133,43 +3196,68 @@ function App() {
           pres_si: 0, pres_tot: 0,
           fil_ctrl_viol: 0, fil_ctrl_tot: 0,
           pres_ctrl_viol: 0, pres_ctrl_tot: 0,
+          backlog: 0,
+          sla_breach: 0
         });
       }
       const s = map.get(region)!;
-      const service = String(i.servizio_hd || '').trim().toUpperCase();
-      const slaVal = String(i.in_sla || '').trim().toUpperCase();
-      const duration = Number(i.durata);
 
-      // Validate SLA Value (SI/NO only)
-      const isValidSla = slaVal === 'SI' || slaVal === 'NO';
-      const isSi = slaVal === 'SI';
+      const isClosed = ['Chiuso', 'Closed'].includes(i.stato || '');
+      const isSuspended = ['Sospeso', 'Suspended'].includes(i.stato || '');
 
-      // Complessivo (SI / Total)
-      if (isValidSla) {
-        if (service === 'TECNOFIL') {
-          s.fil_tot++;
-          if (isSi) s.fil_si++;
-        } else if (service === 'TECNODIR') {
-          s.pres_tot++;
-          if (isSi) s.pres_si++;
-        }
+      // BACKLOG LOGIC (All active)
+      if (!isClosed) {
+        s.backlog++;
+        if (isSlaBreach(i.violazione_avvenuta)) s.sla_breach++;
       }
 
-      // Controllo (Compliance / Total) - Same subset
-      if (isValidSla) {
-        const isViolation = !isNaN(duration) && duration > 2640;
-        if (service === 'TECNOFIL') {
-          s.fil_ctrl_tot++;
-          if (isViolation) s.fil_ctrl_viol++;
-        } else if (service === 'TECNODIR') {
-          s.pres_ctrl_tot++;
-          if (isViolation) s.pres_ctrl_viol++;
+      // SLA LOGIC (Closed in Current Month)
+      let isInReportingPeriod = false;
+      if (isClosed && i.data_chiusura) {
+        try {
+          const d = new Date(i.data_chiusura);
+          if (!isNaN(d.getTime()) && d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+            isInReportingPeriod = true;
+          }
+        } catch (e) { }
+      }
+
+      if (isInReportingPeriod) {
+        const service = String(i.servizio_hd || '').trim().toUpperCase();
+        const slaVal = String(i.in_sla || '').trim().toUpperCase();
+        const duration = Number(i.durata);
+
+        // Validate SLA Value (SI/NO only)
+        const isValidSla = slaVal === 'SI' || slaVal === 'NO';
+        const isSi = slaVal === 'SI';
+
+        // Complessivo (SI / Total)
+        if (isValidSla) {
+          if (service === 'TECNOFIL') {
+            s.fil_tot++;
+            if (isSi) s.fil_si++;
+          } else if (service === 'TECNODIR') {
+            s.pres_tot++;
+            if (isSi) s.pres_si++;
+          }
+        }
+
+        // Controllo (Compliance / Total)
+        if (isValidSla) {
+          const isViolation = !isNaN(duration) && duration > 2640;
+          if (service === 'TECNOFIL') {
+            s.fil_ctrl_tot++;
+            if (isViolation) s.fil_ctrl_viol++;
+          } else if (service === 'TECNODIR') {
+            s.pres_ctrl_tot++;
+            if (isViolation) s.pres_ctrl_viol++;
+          }
         }
       }
     });
 
     return Array.from(map.values()).sort((a, b) => a.region.localeCompare(b.region));
-  }, [dashboardData]);
+  }, [dashboardData, slaDate]);
 
   const handleIncidentUpdate = (updatedIncident: Incident) => {
     setIncidents(prev => prev.map(i => i.numero === updatedIncident.numero ? updatedIncident : i));
@@ -3198,7 +3286,7 @@ function App() {
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition-colors">
             <Menu />
           </button>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 tracking-tight">Maintenance Analytics</h1>
+          <h1 className="text-3xl font-bold text-slate-200 tracking-tight">Monitor ISP</h1>
         </div>
 
         {view === 'dashboard' && (
@@ -3244,6 +3332,7 @@ function App() {
               }}
               selectedRule={selectedInsightRule}
               compact={true}
+              rules={allInsightRules}
             />
 
 
@@ -3299,7 +3388,38 @@ function App() {
                 <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                   <div className="w-1 h-6 bg-emerald-500 rounded-full"></div>
                   Livelli di Servizio
-                  <span className="text-xs font-normal text-slate-500 ml-2">(Mese Corrente - Chiusi)</span>
+                  <div className="flex gap-2 ml-4">
+                    <select
+                      className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                      value={slaDate.getMonth()}
+                      onChange={(e) => {
+                        const d = new Date(slaDate);
+                        d.setMonth(parseInt(e.target.value));
+                        setSlaDate(d);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <option key={i} value={i} className="bg-slate-800 text-white">
+                          {new Date(0, i).toLocaleString('it-IT', { month: 'long' }).replace(/^\w/, c => c.toUpperCase())}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                      value={slaDate.getFullYear()}
+                      onChange={(e) => {
+                        const d = new Date(slaDate);
+                        d.setFullYear(parseInt(e.target.value));
+                        setSlaDate(d);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {[2024, 2025, 2026].map(y => (
+                        <option key={y} value={y} className="bg-slate-800 text-white">{y}</option>
+                      ))}
+                    </select>
+                  </div>
                 </h3>
               </div>
 
@@ -3308,7 +3428,7 @@ function App() {
                   // SAFETY: Ensure data exists
                   if (!dashboardData || !Array.isArray(dashboardData)) return null;
 
-                  const now = new Date();
+                  const now = new Date(slaDate);
                   const currentMonth = now.getMonth();
                   const currentYear = now.getFullYear();
 
@@ -3570,6 +3690,7 @@ function App() {
               // In this view, we FILTER the table, we DO NOT open the modal (Phase 59)
             }}
             selectedInsight={selectedInsightRule}
+            insightRules={allInsightRules}
           />
         )}
 
@@ -3587,7 +3708,7 @@ function App() {
       {showInsightModal && selectedInsightRule && (
         <InsightListModal
           data={insightFilteredData}
-          rule={INSIGHT_RULES.find(r => r.id === selectedInsightRule)!}
+          rule={allInsightRules.find(r => r.id === selectedInsightRule)!}
           onClose={() => { setShowInsightModal(false); setSelectedInsightRule(null); }}
           onSelectIncident={(incident) => {
             // setShowInsightModal(false); // STACKING: Keep List open behind Detail
