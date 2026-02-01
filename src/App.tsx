@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, Hexagon, ShieldCheck, History } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, History } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -3203,7 +3203,7 @@ function App() {
       const s = map.get(region)!;
 
       const isClosed = ['Chiuso', 'Closed'].includes(i.stato || '');
-      const isSuspended = ['Sospeso', 'Suspended'].includes(i.stato || '');
+
 
       // BACKLOG LOGIC (All active)
       if (!isClosed) {
