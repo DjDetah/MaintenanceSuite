@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, Download, CalendarPlus, List, Activity } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -47,7 +48,9 @@ interface Incident {
   data_richiesta_parti?: string;
   parti_richieste?: string;
   richiesta_apparato?: boolean;
-  stato_richiesta?: 'Pending' | 'In gestione' | 'Disponibile' | 'Evasione';
+  stato_richiesta?: 'Pending' | 'In gestione' | 'Disponibile' | 'Evasione' | 'Bocciato' | 'Annullato' | 'CONSEGNATO';
+  ldv?: string;
+  data_consegna?: string;
   gruppo_assegnazione?: string; // EUS_LOCKER_LASER_MICROINF_INC or EUS_LASER_MICROINF_INC
   fornitore?: string;
   [key: string]: any; // Allow dynamic access
@@ -58,6 +61,7 @@ interface UserProfile {
   email: string;
   role: string;
   regions: string[];
+  display_name?: string;
 }
 
 type ViewMode = 'dashboard' | 'incidents' | 'import' | 'requests' | 'settings';
@@ -222,7 +226,14 @@ const Sidebar = ({
           {loading ? <p className="text-xs text-slate-500 text-center">Loading...</p> : user ? (
             <div className="bg-slate-800/50 rounded-lg p-3 mb-4 border border-white/5">
               <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Utente</p>
-              <p className="text-sm font-semibold text-white truncate">{user.email}</p>
+              {user.display_name ? (
+                <>
+                  <p className="text-sm font-semibold text-white truncate">{user.display_name}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{user.email}</p>
+                </>
+              ) : (
+                <p className="text-sm font-semibold text-white truncate">{user.email}</p>
+              )}
               <p className="text-xs text-blue-300 mt-1 capitalize">{user.role}</p>
             </div>
           ) : <p className="text-xs text-red-500 px-2 pb-2">Not Authenticated</p>}
@@ -401,6 +412,7 @@ const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilt
           </thead>
           <tbody className="text-xs text-slate-300 divide-y divide-white/5">
             {stats.map(s => {
+              if (s.backlog === 0) return null;
               const expiringToday = data.filter(i => (i.regione === s.region) && isSlaExpiringToday(i)).length;
               return (
                 <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => onFilterChange(s.region, '')}>
@@ -493,6 +505,7 @@ const LockerStatsTable = ({ data }: { data: Incident[] }) => {
           </thead>
           <tbody className="text-xs text-slate-300 divide-y divide-white/5">
             {stats.map(s => {
+              if (s.backlog === 0) return null;
               const expiringToday = lockerData.filter(i => (i.citta === s.region) && isSlaExpiringToday(i)).length; // Filter on lockerData!
               return (
                 <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer">
@@ -811,7 +824,7 @@ const PlanningModal = ({ current, onSave, onClose }: { current?: string, onSave:
 };
 
 // 3c. Detail Modal
-const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident: Incident, onClose: () => void, onIncidentUpdate?: (updated: Incident) => void }) => {
+const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate, user }: { incident: Incident, onClose: () => void, onIncidentUpdate?: (updated: Incident) => void, user: UserProfile | null }) => {
   const [showRaw, setShowRaw] = useState(false);
   const [showPlanning, setShowPlanning] = useState(false); // New state for planning modal
   const [notesHistory, setNotesHistory] = useState(incident.note_laser || '');
@@ -819,13 +832,35 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
   // Parts Request State
   const [selectedParts, setSelectedParts] = useState<string[]>(incident.parti_richieste ? incident.parti_richieste.split('|') : []);
   const [isDeviceRequested, setIsDeviceRequested] = useState(incident.richiesta_apparato || false);
+  const [ldv, setLdv] = useState(incident.ldv || '');
+  const [dataConsegna, setDataConsegna] = useState(incident.data_consegna || '');
+
+  const [confirmAction, setConfirmAction] = useState<'Bocciato' | 'Annullato' | null>(null);
+
+  const handleConfirmAction = async () => {
+    if (!confirmAction) return;
+    const updates: Partial<Incident> = { stato_richiesta: confirmAction };
+
+    // Optimistic Update
+    if (onIncidentUpdate) onIncidentUpdate({ ...incident, ...updates });
+
+    const { error } = await supabase.from('incidents').update(updates).eq('numero', incident.numero);
+
+    if (error) {
+      alert('Errore aggiornamento stato: ' + error.message);
+      // Revert optimistic? Complex without proper state management, assuming success usually.
+    }
+    setConfirmAction(null);
+  };
 
   // Sync state if prop changes (e.g. if opened different incident or external update)
   useEffect(() => {
     setNotesHistory(incident.note_laser || '');
     setSelectedParts(incident.parti_richieste ? incident.parti_richieste.split('|') : []);
     setIsDeviceRequested(incident.richiesta_apparato || false);
-  }, [incident.note_laser, incident.parti_richieste, incident.richiesta_apparato]);
+    setLdv(incident.ldv || '');
+    setDataConsegna(incident.data_consegna || '');
+  }, [incident.note_laser, incident.parti_richieste, incident.richiesta_apparato, incident.ldv, incident.data_consegna]);
 
   const handlePartsSave = async () => {
     // Logic: If timestamp is empty and we are making a request, set it.
@@ -840,11 +875,13 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
       timestamp = new Date().toISOString();
     }
 
-    const updates = {
+    const updates: any = {
       parti_richieste: selectedParts.join('|'),
       richiesta_apparato: isDeviceRequested,
       data_richiesta_parti: timestamp,
-      stato_richiesta: incident.stato_richiesta || 'Pending' // Persist current status or default
+      stato_richiesta: incident.stato_richiesta || 'Pending', // Persist current status or default
+      ldv: ldv || null,
+      data_consegna: dataConsegna || null
     };
 
     const { error } = await supabase.from('incidents').update(updates).eq('numero', incident.numero);
@@ -1096,7 +1133,7 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
                   {/* Parts List */}
                   <div className={cn("space-y-1 transition-opacity duration-300", isDeviceRequested ? "opacity-50 pointer-events-none grayscale" : "opacity-100")}>
                     <div className="flex flex-col gap-1.5">
-                      {['Scheda Madre', 'ADF', 'Display', 'Cassetto'].map(part => (
+                      {['Scheda Madre', 'ADF', 'Display', 'Cassetto', 'Mouse', 'Tastiera', 'Alimentatore', 'Docking'].map(part => (
                         <label key={part} className="flex items-center gap-2 p-1.5 rounded bg-slate-800/50 border border-white/5 cursor-pointer hover:bg-slate-800 transition-colors">
                           <input
                             type="checkbox"
@@ -1133,21 +1170,53 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
 
                 {/* Save Button & Status */}
                 <div className="mt-3 flex flex-col gap-1 pt-2 border-t border-white/5">
+                  {/* LDV & Data Consegna Inputs */}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <div>
+                      <label className="text-[9px] text-slate-500 uppercase font-bold block mb-1">LDV</label>
+                      <input
+                        type="text"
+                        value={ldv}
+                        onChange={(e) => setLdv(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded px-2 py-1 focus:ring-amber-500 focus:border-amber-500"
+                        placeholder="Lett. Vettura"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Data Consegna</label>
+                      <input
+                        type="date"
+                        value={dataConsegna}
+                        onChange={(e) => setDataConsegna(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded px-2 py-1 focus:ring-amber-500 focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
                   {/* Status Cycle Button - Only visible after request is saved (timestamp exists) */}
                   {incident.data_richiesta_parti && (
                     <button
                       onClick={async () => {
-                        const states = ['Pending', 'In gestione', 'Disponibile', 'Evasione'];
+                        const states = ['Pending', 'In gestione', 'Disponibile', 'Evasione', 'CONSEGNATO'];
                         const current = incident.stato_richiesta || 'Pending';
 
                         // Terminal state check
-                        if (current === 'Evasione') return;
+                        if (current === 'CONSEGNATO') return;
 
                         const nextIndex = states.indexOf(current) + 1;
                         const nextState = states[nextIndex];
 
+                        // Validation for CONSEGNATO
+                        if (nextState === 'CONSEGNATO' && !dataConsegna) {
+                          alert('Devi inserire la Data Consegna prima di impostare lo stato su CONSEGNATO.');
+                          return;
+                        }
+
                         // Immediate update local & DB
-                        const updates: Partial<Incident> = { stato_richiesta: nextState as "Pending" | "In gestione" | "Disponibile" | "Evasione" };
+                        const updates: Partial<Incident> = {
+                          stato_richiesta: nextState as any
+                        };
+
                         if (onIncidentUpdate) onIncidentUpdate({ ...incident, ...updates }); // Optimistic
 
                         const { error } = await supabase.from('incidents').update(updates).eq('numero', incident.numero);
@@ -1157,12 +1226,41 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
                         (incident.stato_richiesta || 'Pending') === 'Pending' ? "bg-slate-700 text-slate-300 hover:bg-slate-600" :
                           (incident.stato_richiesta) === 'In gestione' ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border border-blue-500/30" :
                             (incident.stato_richiesta) === 'Disponibile' ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30" :
-                              "bg-purple-500/20 text-purple-400 border border-purple-500/30 cursor-not-allowed opacity-80" // Evasione (Disabled style)
+                              (incident.stato_richiesta) === 'Evasione' ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 border border-purple-500/30" :
+                                "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 cursor-not-allowed opacity-80" // CONSEGNATO
                       )}
-                      disabled={incident.stato_richiesta === 'Evasione'}
+                      disabled={incident.stato_richiesta === 'CONSEGNATO' || incident.stato_richiesta === 'Bocciato' || incident.stato_richiesta === 'Annullato'}
                     >
                       {incident.stato_richiesta || 'Pending'}
                     </button>
+                  )}
+
+                  {/* Action Buttons (Bocciato / Annullato) - Only if request exists */}
+                  {incident.data_richiesta_parti && (
+                    <div className="grid grid-cols-2 gap-2 mb-1">
+                      <button
+                        onClick={() => setConfirmAction('Bocciato')}
+                        disabled={incident.stato_richiesta === 'Bocciato'}
+                        className={cn("px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors flex items-center justify-center gap-1",
+                          incident.stato_richiesta === 'Bocciato'
+                            ? "bg-red-500/20 text-red-400 border-red-500/30 cursor-default"
+                            : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-red-900/20 hover:text-red-400 hover:border-red-500/30"
+                        )}
+                      >
+                        <X size={12} /> Boccia
+                      </button>
+                      <button
+                        onClick={() => setConfirmAction('Annullato')}
+                        disabled={incident.stato_richiesta === 'Annullato'}
+                        className={cn("px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors flex items-center justify-center gap-1",
+                          incident.stato_richiesta === 'Annullato'
+                            ? "bg-slate-500/20 text-slate-300 border-slate-500/30 cursor-default"
+                            : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
+                        )}
+                      >
+                        <LogOut size={12} className="rotate-180" /> Annulla
+                      </button>
+                    </div>
                   )}
 
                   <button
@@ -1212,7 +1310,8 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
                           if (!newText) return;
 
                           const timestamp = new Date().toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                          const entry = `[${timestamp}] ${newText}`;
+                          const author = user?.display_name || user?.email || 'Utente';
+                          const entry = `[${timestamp}] [${author}] ${newText}`;
 
                           // Append to existing
                           const updatedNotes = (notesHistory ? notesHistory + "\n\n" : "") + entry;
@@ -1249,93 +1348,330 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate }: { incident
       </div>
       {showRaw && <RawDataModal data={incident} onClose={() => setShowRaw(false)} />}
       {showPlanning && <PlanningModal current={incident.pianificazione} onSave={handlePlanningSave} onClose={() => setShowPlanning(false)} />}
+
+      {/* Confirmation Modal Overlay */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-[80] flex items-center justify-center p-6 animate-in fade-in duration-200" onClick={() => setConfirmAction(null)}>
+          <div className="bg-slate-900 border border-slate-700 p-6 rounded-xl shadow-2xl max-w-sm w-full relative" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+              {confirmAction === 'Bocciato' ? <AlertTriangle className="text-red-500" /> : <LogOut className="text-slate-400" />}
+              Conferma Azione
+            </h3>
+            <p className="text-sm text-slate-400 mb-6">
+              Sei sicuro di voler impostare lo stato della richiesta a <span className={confirmAction === 'Bocciato' ? "text-red-400 font-bold" : "text-white font-bold"}>{confirmAction}</span>?
+              {confirmAction === 'Bocciato' && <span className="block mt-1 text-xs text-red-500/80">Questa azione non è reversibile dal flusso standard.</span>}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmAction(null)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white transition-colors">Annulla</button>
+              <button
+                onClick={handleConfirmAction}
+                className={cn("px-4 py-2 text-sm font-bold rounded-lg shadow-lg transition-colors",
+                  confirmAction === 'Bocciato' ? "bg-red-600 hover:bg-red-700 text-white" : "bg-slate-600 hover:bg-slate-500 text-white"
+                )}
+              >
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // 3d. Parts Request Table (New for v0.5)
 // 3d. Parts Request Table (New for v0.5)
-const PartsRequestTable = ({ data, onSelect }: { data: Incident[], onSelect: (inc: Incident) => void }) => {
-  // Filter only having parts or device request
-  const requests = data.filter(i => i.data_richiesta_parti || i.parti_richieste || i.richiesta_apparato);
+const RequestKPICards = ({ stats, selectedStatus, onStatusSelect }: { stats: any, selectedStatus: string | null, onStatusSelect: (s: string | null) => void }) => {
+  const getActiveClass = (status: string | null) => {
+    if (selectedStatus === status) return "ring-2 ring-white scale-105 shadow-2xl brightness-125";
+    if (selectedStatus && selectedStatus !== status) return "opacity-50 blur-[1px] grayscale hover:grayscale-0 hover:opacity-100 hover:blur-none";
+    return "";
+  };
 
-  if (requests.length === 0) {
+  return (
+    <div className="grid grid-cols-7 gap-2 mb-6 w-full">
+      <div
+        onClick={() => onStatusSelect(null)}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", !selectedStatus ? "ring-2 ring-white/20" : "opacity-70 hover:opacity-100")}
+      >
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Totale</p>
+        <h3 className="text-lg md:text-xl font-bold text-white leading-tight">{stats.total}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('Pending')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Pending'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><Clock size={16} className="text-slate-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Pending</p>
+        <h3 className="text-lg md:text-xl font-bold text-slate-400 leading-tight">{stats.pending}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('In gestione')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('In gestione'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><Activity size={16} className="text-blue-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">In Gestione</p>
+        <h3 className="text-lg md:text-xl font-bold text-blue-400 leading-tight">{stats.ingestione}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('Disponibile')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Disponibile'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><CheckCircle size={16} className="text-emerald-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Disponibile</p>
+        <h3 className="text-lg md:text-xl font-bold text-emerald-400 leading-tight">{stats.disponibile}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('Evasione')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Evasione'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><Settings size={16} className="text-purple-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Evasione</p>
+        <h3 className="text-lg md:text-xl font-bold text-purple-400 leading-tight">{stats.evasione}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('Bocciato')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('Bocciato'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><X size={16} className="text-red-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Bocciato</p>
+        <h3 className="text-lg md:text-xl font-bold text-red-500 leading-tight">{stats.bocciato}</h3>
+      </div>
+
+      <div
+        onClick={() => onStatusSelect('CONSEGNATO')}
+        className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", getActiveClass('CONSEGNATO'))}
+      >
+        <div className="absolute top-1 right-1 opacity-10"><CheckCircle size={16} className="text-cyan-400" /></div>
+        <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Consegnato</p>
+        <h3 className="text-lg md:text-xl font-bold text-cyan-400 leading-tight">{stats.consegnato}</h3>
+      </div>
+    </div>
+  );
+};
+
+const PartsRequestTable = ({ data, onSelect }: { data: Incident[], onSelect: (inc: Incident) => void }) => {
+  const [filter, setFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  // 1. Filter: Base (Has Request) AND Not Closed
+  const baseData = useMemo(() => {
+    return data.filter(i =>
+      (i.data_richiesta_parti || i.parti_richieste || i.richiesta_apparato) &&
+      !['Chiuso', 'Closed'].includes(i.stato || '')
+    );
+  }, [data]);
+
+  // 2. Stats Calculation
+  const stats = useMemo(() => {
+    return {
+      total: baseData.length,
+      pending: baseData.filter(i => !i.stato_richiesta || i.stato_richiesta === 'Pending').length,
+      ingestione: baseData.filter(i => i.stato_richiesta === 'In gestione').length,
+      disponibile: baseData.filter(i => i.stato_richiesta === 'Disponibile').length,
+      evasione: baseData.filter(i => i.stato_richiesta === 'Evasione').length,
+      bocciato: baseData.filter(i => i.stato_richiesta === 'Bocciato').length,
+      annullato: baseData.filter(i => i.stato_richiesta === 'Annullato').length,
+      consegnato: baseData.filter(i => i.stato_richiesta === 'CONSEGNATO').length,
+    };
+  }, [baseData]);
+
+  // 3. Final Filtering (Search & Status)
+  const filteredRequests = useMemo(() => {
+    let res = baseData;
+
+    // Status Filter
+    if (statusFilter) {
+      if (statusFilter === 'Pending') res = res.filter(i => !i.stato_richiesta || i.stato_richiesta === 'Pending');
+      else res = res.filter(i => i.stato_richiesta === statusFilter);
+    }
+
+    // Search Filter
+    if (filter) {
+      const lower = filter.toLowerCase();
+      res = res.filter(i =>
+        i.numero.toLowerCase().includes(lower) ||
+        (i.stato && i.stato.toLowerCase().includes(lower)) ||
+        (i.regione && i.regione.toLowerCase().includes(lower)) ||
+        (i.fornitore && i.fornitore.toLowerCase().includes(lower)) ||
+        (i.item && i.item.toLowerCase().includes(lower)) ||
+        (i.tag_asset && i.tag_asset.toLowerCase().includes(lower)) ||
+        (i.parti_richieste && i.parti_richieste.toLowerCase().includes(lower)) ||
+        (i.stato_richiesta && i.stato_richiesta.toLowerCase().includes(lower)) ||
+        (i.data_richiesta_parti && new Date(i.data_richiesta_parti).toLocaleDateString().includes(lower)) ||
+        (i.ldv && i.ldv.toLowerCase().includes(lower))
+      );
+    }
+
+
+
+    // Sorting
+    if (sortConfig) {
+      res.sort((a: any, b: any) => {
+        if (a[sortConfig.key] < b[sortConfig.key]) {
+          return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (a[sortConfig.key] > b[sortConfig.key]) {
+          return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+
+    return res;
+  }, [baseData, filter, statusFilter, sortConfig]);
+
+  if (baseData.length === 0) {
     return (
       <div className="glass-card p-8 flex flex-col items-center justify-center text-center h-96">
         <Settings size={48} className="text-slate-600 mb-4 animate-spin-slow" />
-        <h3 className="text-xl font-bold text-slate-300">Nessuna Richiesta</h3>
-        <p className="text-slate-500 mt-2 max-w-md">Non ci sono richieste di ricambi o apparati attive al momento.</p>
+        <h3 className="text-xl font-bold text-slate-300">Nessuna Richiesta Attiva</h3>
+        <p className="text-slate-500 mt-2 max-w-md">Non ci sono richieste di ricambi o apparati attive per incidenti aperti.</p>
       </div>
     );
   }
 
   return (
-    <div className="glass-card overflow-hidden">
-      <div className="px-6 py-4 border-b border-slate-700/50 flex justify-between items-center bg-slate-800/20">
-        <h3 className="font-bold text-slate-200 flex items-center gap-2">
-          <Settings size={18} className="text-purple-400" />
-          Gestione Richieste Ricambi / Apparati
-        </h3>
-        <span className="text-xs bg-slate-700 text-slate-300 px-2 py-1 rounded-full">{requests.length} richieste</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="text-xs text-slate-400 border-b border-slate-700/50 bg-slate-900/40">
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Numero</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Stato Incident</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Regione</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Fornitore</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Item / Asset</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Data Richiesta</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider text-center">Ricambi?</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider text-center">Apparato?</th>
-              <th className="px-4 py-3 font-semibold uppercase tracking-wider">Stato Richiesta</th>
-            </tr>
-          </thead>
-          <tbody className="text-sm divide-y divide-slate-700/30">
-            {requests.map(inc => (
-              <tr key={inc.numero} onClick={() => onSelect(inc)} className="hover:bg-slate-700/20 transition-colors group cursor-pointer">
-                <td className="px-4 py-3 font-mono text-slate-300 group-hover:text-blue-400">{inc.numero}</td>
-                <td className="px-4 py-3">
-                  <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase",
-                    inc.stato === 'Aperto' ? 'bg-red-500/10 text-red-500' : 'bg-slate-600/10 text-slate-400'
-                  )}>{inc.stato}</span>
-                </td>
-                <td className="px-4 py-3 text-slate-400">{inc.regione || '-'}</td>
-                <td className="px-4 py-3">
-                  {inc.fornitore ? (
-                    <span className="text-xs bg-amber-500/10 text-amber-500 px-2 py-1 rounded border border-amber-500/20">{inc.fornitore}</span>
-                  ) : '-'}
-                </td>
-                <td className="px-4 py-3 text-slate-400">{inc.item || inc.tag_asset || '-'}</td>
-                <td className="px-4 py-3 text-slate-300 font-mono">
-                  {inc.data_richiesta_parti ? new Date(inc.data_richiesta_parti).toLocaleDateString() : '-'}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  {inc.parti_richieste ? (
-                    <span className="text-xs bg-purple-500/10 text-purple-400 px-2 py-1 rounded border border-purple-500/20">SI ({inc.parti_richieste.split('|').length})</span>
-                  ) : <span className="text-slate-600 text-[10px]">-</span>}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  {inc.richiesta_apparato ? (
-                    <span className="text-xs bg-amber-500/10 text-amber-400 px-2 py-1 rounded border border-amber-500/20">SI</span>
-                  ) : <span className="text-slate-600 text-[10px]">-</span>}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase border",
-                    inc.stato_richiesta === 'Pending' ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' :
-                      inc.stato_richiesta === 'In gestione' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        inc.stato_richiesta === 'Disponibile' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                          'bg-purple-500/10 text-purple-400 border-purple-500/10'
-                  )}>
-                    {inc.stato_richiesta || 'PENDING'}
-                  </span>
-                </td>
+    <div className="space-y-6">
+      <RequestKPICards stats={stats} selectedStatus={statusFilter} onStatusSelect={setStatusFilter} />
+
+      <div className="glass-card overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-700/50 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-800/20">
+          <h3 className="font-bold text-slate-200 flex items-center gap-2">
+            <Settings size={18} className="text-purple-400" />
+            Gestione Richieste Ricambi / Apparati
+          </h3>
+
+          <div className="relative w-full md:w-64">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Search size={14} className="text-slate-400" /></div>
+            <input
+              type="text"
+              className="bg-slate-900/50 border border-slate-700 text-slate-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-9 p-2 placeholder-slate-500"
+              placeholder="Cerca richiesta..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left text-slate-300 whitespace-nowrap border-collapse">
+            <thead>
+              <tr className="text-xs text-slate-400 border-b border-slate-700/50 bg-slate-900/40">
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('numero')}>
+                  <div className="flex items-center gap-1">Numero {sortConfig?.key === 'numero' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('stato')}>
+                  <div className="flex items-center gap-1">Stato {sortConfig?.key === 'stato' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider text-center cursor-pointer hover:text-white" onClick={() => requestSort('violazione_avvenuta')}>
+                  <div className="flex items-center justify-center gap-1">SLA {sortConfig?.key === 'violazione_avvenuta' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('regione')}>
+                  <div className="flex items-center gap-1">Regione {sortConfig?.key === 'regione' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('fornitore')}>
+                  <div className="flex items-center gap-1">Fornitore {sortConfig?.key === 'fornitore' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('item')}>
+                  <div className="flex items-center gap-1">Item / Asset {sortConfig?.key === 'item' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('data_richiesta_parti')}>
+                  <div className="flex items-center gap-1">Data Richiesta {sortConfig?.key === 'data_richiesta_parti' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('ldv')}>
+                  <div className="flex items-center gap-1">LDV {sortConfig?.key === 'ldv' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('data_consegna')}>
+                  <div className="flex items-center gap-1">Data Consegna {sortConfig?.key === 'data_consegna' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider text-center cursor-pointer hover:text-white" onClick={() => requestSort('parti_richieste')}>
+                  <div className="flex items-center justify-center gap-1">Ricambi? {sortConfig?.key === 'parti_richieste' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider text-center cursor-pointer hover:text-white" onClick={() => requestSort('richiesta_apparato')}>
+                  <div className="flex items-center justify-center gap-1">Apparato? {sortConfig?.key === 'richiesta_apparato' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
+                <th className="px-4 py-3 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('stato_richiesta')}>
+                  <div className="flex items-center gap-1">Stato Richiesta {sortConfig?.key === 'stato_richiesta' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="text-xs divide-y divide-slate-700/30">
+              {filteredRequests.map(inc => (
+                <tr key={inc.numero} onClick={() => onSelect(inc)} className="hover:bg-slate-700/20 transition-colors group cursor-pointer">
+                  <td className="px-4 py-3 font-mono text-slate-300 group-hover:text-blue-400">{inc.numero}</td>
+                  <td className="px-4 py-3">
+                    <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                      inc.stato === 'Aperto' ? 'bg-red-500/10 text-red-500' : 'bg-slate-600/10 text-slate-400'
+                    )}>{inc.stato}</span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {inc.violazione_avvenuta ? (
+                      <span className="text-red-500 flex justify-center" title="Violazione SLA"><AlertTriangle size={14} /></span>
+                    ) : (
+                      <span className="text-emerald-500/30 flex justify-center" title="SLA OK"><CheckCircle size={14} /></span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">{inc.regione || '-'}</td>
+                  <td className="px-4 py-3">
+                    {inc.fornitore ? (
+                      <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-1 rounded border border-amber-500/20">{inc.fornitore}</span>
+                    ) : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400 text-[10px]">{inc.item || inc.tag_asset || '-'}</td>
+                  <td className="px-4 py-3 text-slate-300 font-mono">
+                    {inc.data_richiesta_parti ? new Date(inc.data_richiesta_parti).toLocaleDateString() : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400 font-mono text-xs">{inc.ldv || '-'}</td>
+                  <td className="px-4 py-3 text-slate-400 font-mono text-xs">
+                    {inc.data_consegna ? new Date(inc.data_consegna).toLocaleDateString() : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {inc.parti_richieste ? (
+                      <span className="text-xs bg-purple-500/10 text-purple-400 px-2 py-1 rounded border border-purple-500/20">SI ({inc.parti_richieste.split('|').length})</span>
+                    ) : <span className="text-slate-600 text-[10px]">-</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {inc.richiesta_apparato ? (
+                      <span className="text-xs bg-amber-500/10 text-amber-400 px-2 py-1 rounded border border-amber-500/20">SI</span>
+                    ) : <span className="text-slate-600 text-[10px]">-</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase border",
+                      (!inc.stato_richiesta || inc.stato_richiesta === 'Pending') ? 'bg-slate-500/10 text-slate-400 border-slate-500/20' :
+                        inc.stato_richiesta === 'In gestione' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                          inc.stato_richiesta === 'Disponibile' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                            inc.stato_richiesta === 'Evasione' ? 'bg-purple-500/10 text-purple-400 border-purple-500/10' :
+                              inc.stato_richiesta === 'CONSEGNATO' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
+                                inc.stato_richiesta === 'Bocciato' ? 'bg-red-500/10 text-red-400 border-red-500/10' :
+                                  'bg-slate-500/5 text-slate-500 border-slate-500/10' // Annullato
+                    )}>
+                      {inc.stato_richiesta || 'PENDING'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {filteredRequests.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="text-center py-8 text-slate-500 italic">Nessuna richiesta trovata con i filtri attuali.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -1343,32 +1679,64 @@ const PartsRequestTable = ({ data, onSelect }: { data: Incident[], onSelect: (in
 
 const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?: (updated: Incident) => void, onSelect: (inc: Incident) => void }) => {
   const [filter, setFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'chiusi' | 'violazioni'>('tutti');
+  const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'in_lavorazione' | 'sospesi' | 'chiusi' | 'violazioni'>('tutti');
   const [page, setPage] = useState(1);
-  const pageSize = 12; // Slightly more dense
+  const pageSize = 50;
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Incident, direction: 'asc' | 'desc' } | null>(null);
 
-  // Sync selectedIncident when data updates (e.g. after save)
-  // Sync selectedIncident when data updates (e.g. after save) - REMOVED LOCAL SYNC, handled by Parent if needed or Re-render
-  // If parent holds state, and 'data' updates, the 'selectedIncident' passed back to Modal should also be updated via App logic if needed.
-  // Actually, App needs to know if selectedIncident is stale.
-  // We'll handle that in App or just let it close/refresh.
+  const requestSort = (key: keyof Incident) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
 
-  // ... (useMemo etc remains same) ...
+  // Tooltip State
+  const [hoveredIncident, setHoveredIncident] = useState<{ id: string, data: Incident, rect: DOMRect, type: 'main' | 'parts' | 'device' } | null>(null);
+
+  // Stats for Cards
+  const stats = useMemo(() => {
+    return {
+      total: data.length,
+      backlog: data.filter(i => ['Aperto', 'In Corso', 'In Lavorazione', 'Sospeso', 'Suspended'].includes(i.stato || '') && !['Chiuso', 'Closed'].includes(i.stato || '')).length,
+      in_lavorazione: data.filter(i => ['In Corso', 'In Lavorazione'].includes(i.stato || '')).length,
+      suspended: data.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '')).length,
+      closed: data.filter(i => ['Chiuso', 'Closed'].includes(i.stato || '')).length,
+      sla_breach: data.filter(i => isSlaBreach(i.violazione_avvenuta)).length
+    };
+  }, [data]);
+
+  const sortData = (data: Incident[], config: { key: keyof Incident, direction: 'asc' | 'desc' }) => {
+    return [...data].sort((a: any, b: any) => {
+      if (a[config.key] < b[config.key]) {
+        return config.direction === 'asc' ? -1 : 1;
+      }
+      if (a[config.key] > b[config.key]) {
+        return config.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  };
+
   const filteredData = useMemo(() => {
     let res = data;
-    if (statusFilter === 'backlog') res = res.filter(i => ['Aperto', 'In Corso', 'In Lavorazione', 'Sospeso', 'Suspended'].includes(i.stato || ''));
+    if (statusFilter === 'backlog') res = res.filter(i => ['Aperto', 'In Corso', 'In Lavorazione', 'Sospeso', 'Suspended'].includes(i.stato || '') && !['Chiuso', 'Closed'].includes(i.stato || ''));
+    else if (statusFilter === 'in_lavorazione') res = res.filter(i => ['In Corso', 'In Lavorazione'].includes(i.stato || ''));
+    else if (statusFilter === 'sospesi') res = res.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || ''));
     else if (statusFilter === 'chiusi') res = res.filter(i => ['Chiuso', 'Closed'].includes(i.stato || ''));
     else if (statusFilter === 'violazioni') res = res.filter(i => isSlaBreach(i.violazione_avvenuta));
 
-    if (!filter) return res;
+    if (!filter) return sortConfig ? sortData(res, sortConfig) : res;
     const lower = filter.toLowerCase();
-    return res.filter(i =>
+    const filtered = res.filter(i =>
       i.numero.toLowerCase().includes(lower) ||
       (i.regione && i.regione.toLowerCase().includes(lower)) ||
       (i.citta && i.citta.toLowerCase().includes(lower)) ||
       (i.item && i.item.toLowerCase().includes(lower))
     );
-  }, [data, filter, statusFilter]);
+    return sortConfig ? sortData(filtered, sortConfig) : filtered;
+  }, [data, filter, statusFilter, sortConfig]);
 
   useEffect(() => { setPage(1); }, [filter, statusFilter]);
 
@@ -1389,40 +1757,119 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
   return (
     <div className="glass-card p-6">
       {/* ... (Header/Filters remain same) ... */}
-      <div className="flex flex-col gap-4 mb-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {['tutti', 'backlog', 'chiusi', 'violazioni'].map((s) => (
-            <div key={s} onClick={() => setStatusFilter(s as any)} className={cn("p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-center font-medium uppercase text-xs tracking-wider", statusFilter === s ? "bg-blue-500/20 border-blue-500 text-white shadow-lg shadow-blue-500/10" : "bg-white/5 border-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10")}>{s}</div>
-          ))}
+      {/* Filters Cards */}
+      <div className="grid grid-cols-6 gap-2 mb-6 w-full">
+        <div
+          onClick={() => setStatusFilter('tutti')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'tutti' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Totale</p>
+          <h3 className="text-lg md:text-xl font-bold text-white leading-tight">{stats.total}</h3>
         </div>
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="relative w-full md:w-1/3">
-            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Search size={16} className="text-slate-400" /></div>
-            <input type="text" className="bg-slate-900/50 border border-white/10 text-white text-sm rounded-xl focus:ring-blue-500/50 focus:border-blue-500/50 block w-full pl-10 p-3 placeholder-slate-500 backdrop-blur-sm transition-all" placeholder="Cerca..." value={filter} onChange={e => setFilter(e.target.value)} />
-          </div>
-          <button onClick={exportCSV} className="flex items-center px-4 py-2.5 text-sm font-medium text-white bg-emerald-600/80 hover:bg-emerald-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/20 backdrop-blur-sm"><Download size={16} className="mr-2" /> Export XLSX</button>
+
+        <div
+          onClick={() => setStatusFilter('backlog')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'backlog' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><Clock size={16} className="text-slate-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Backlog Tot</p>
+          <h3 className="text-lg md:text-xl font-bold text-slate-300 leading-tight">{stats.backlog}</h3>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('in_lavorazione')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'in_lavorazione' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><Activity size={16} className="text-purple-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">In Lavorazione</p>
+          <h3 className="text-lg md:text-xl font-bold text-purple-400 leading-tight">{stats.in_lavorazione}</h3>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('sospesi')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'sospesi' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><Clock size={16} className="text-yellow-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Sospesi</p>
+          <h3 className="text-lg md:text-xl font-bold text-yellow-400 leading-tight">{stats.suspended}</h3>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('chiusi')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'chiusi' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><CheckCircle size={16} className="text-emerald-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Chiusi</p>
+          <h3 className="text-lg md:text-xl font-bold text-emerald-400 leading-tight">{stats.closed}</h3>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('violazioni')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'violazioni' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><AlertTriangle size={16} className="text-red-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Violazioni SLA</p>
+          <h3 className="text-lg md:text-xl font-bold text-red-500 leading-tight">{stats.sla_breach}</h3>
         </div>
       </div>
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="relative w-full md:w-1/3">
+          <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"><Search size={16} className="text-slate-400" /></div>
+          <input type="text" className="bg-slate-900/50 border border-white/10 text-white text-sm rounded-xl focus:ring-blue-500/50 focus:border-blue-500/50 block w-full pl-10 p-3 placeholder-slate-500 backdrop-blur-sm transition-all" placeholder="Cerca..." value={filter} onChange={e => setFilter(e.target.value)} />
+        </div>
+        <button onClick={exportCSV} className="flex items-center px-4 py-2.5 text-sm font-medium text-white bg-emerald-600/80 hover:bg-emerald-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/20 backdrop-blur-sm"><Download size={16} className="mr-2" /> Export XLSX</button>
+      </div>
+
 
       <div className="overflow-x-auto rounded-lg border border-white/5">
-        <table className="w-full text-xs text-left text-slate-300 whitespace-nowrap">
-          <thead className="text-[10px] text-slate-400 uppercase bg-slate-900/60 font-semibold tracking-wider">
-            <tr>
-              <th className="px-3 py-1.5">Numero</th>
-              <th className="px-3 py-1.5">Stato</th>
-              <th className="px-3 py-1.5 text-center">SLA</th>
-              <th className="px-3 py-1.5">Item</th>
-              <th className="px-3 py-1.5">Regione</th>
-              <th className="px-3 py-1.5">Città</th>
-              <th className="px-3 py-1.5">Apertura</th>
-              <th className="px-3 py-1.5">Riassegnazione</th>
-              <th className="px-3 py-1.5 text-right">Pianificazione</th>
+        <table className="w-full text-xs text-left text-slate-300 whitespace-nowrap border-collapse">
+          <thead>
+            <tr className="text-xs text-slate-400 border-b border-slate-700/50 bg-slate-900/40">
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('numero')}>
+                <div className="flex items-center gap-1">Numero {sortConfig?.key === 'numero' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('stato')}>
+                <div className="flex items-center gap-1">Stato {sortConfig?.key === 'stato' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider text-center cursor-pointer hover:text-white" onClick={() => requestSort('violazione_avvenuta')}>
+                <div className="flex items-center justify-center gap-1">SLA {sortConfig?.key === 'violazione_avvenuta' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider text-center cursor-pointer hover:text-white" onClick={() => requestSort('richiesta_apparato')}>
+                <div className="flex items-center justify-center gap-1">Rich. {sortConfig?.key === 'richiesta_apparato' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('item')}>
+                <div className="flex items-center gap-1">Item / Asset {sortConfig?.key === 'item' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('regione')}>
+                <div className="flex items-center gap-1">Regione {sortConfig?.key === 'regione' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('citta')}>
+                <div className="flex items-center gap-1">Città {sortConfig?.key === 'citta' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('data_apertura')}>
+                <div className="flex items-center gap-1">Apertura {sortConfig?.key === 'data_apertura' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider cursor-pointer hover:text-white" onClick={() => requestSort('data_ultima_riassegnazione')}>
+                <div className="flex items-center gap-1">Riassegnazione {sortConfig?.key === 'data_ultima_riassegnazione' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wider text-right cursor-pointer hover:text-white" onClick={() => requestSort('pianificazione')}>
+                <div className="flex items-center justify-end gap-1">Pianificazione {sortConfig?.key === 'pianificazione' && (sortConfig.direction === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}</div>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
             {paginatedData.map((row) => (
               <tr key={row.numero} className="bg-transparent hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => onSelect(row)}>
-                <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-300 transition-colors">{row.numero}</td>
+                <td
+                  className="px-3 py-1.5 font-medium text-white hover:text-blue-300 transition-colors cursor-help"
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setHoveredIncident({ id: row.numero, data: row, rect, type: 'main' });
+                  }}
+                  onMouseLeave={() => setHoveredIncident(null)}
+                >
+                  {row.numero}
+                </td>
                 <td className="px-3 py-1.5">
                   <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider",
                     ['Aperto', 'Open', 'New'].includes(row.stato || '') ? 'bg-slate-500/10 text-slate-300 border-slate-500/20' :
@@ -1435,9 +1882,28 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
                   </span>
                 </td>
                 <td className="px-3 py-1.5 text-center">
-                  {isSlaBreach(row.violazione_avvenuta) ? <span className="text-red-500 flex justify-center"><AlertTriangle size={14} /></span> : <span className="text-emerald-500/50 flex justify-center"><CheckCircle size={14} /></span>}
+                  {isSlaBreach(row.violazione_avvenuta) ? <AlertTriangle size={14} className="text-red-500 mx-auto" /> : <div className="w-3.5 h-3.5 mx-auto rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center"><CheckCircle size={10} /></div>}
                 </td>
-                <td className="px-3 py-1.5 text-slate-400 max-w-[150px] truncate" title={row.item}>{row.item || '-'}</td>
+                <td className="px-3 py-1.5 text-center">
+                  {row.richiesta_apparato ? (
+                    <div className="flex justify-center" onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setHoveredIncident({ id: row.numero, data: row, rect, type: 'device' });
+                    }} onMouseLeave={() => setHoveredIncident(null)}>
+                      <Monitor size={14} className="text-red-400 cursor-help" />
+                    </div>
+                  ) : row.parti_richieste ? (
+                    <div className="flex justify-center" onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setHoveredIncident({ id: row.numero, data: row, rect, type: 'parts' });
+                    }} onMouseLeave={() => setHoveredIncident(null)}>
+                      <Settings size={14} className="text-amber-400 cursor-help" />
+                    </div>
+                  ) : (
+                    <span className="text-slate-600 text-[10px]">-</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-slate-400 truncate max-w-[150px]" title={row.item}>{row.item || '-'}</td>
                 <td className="px-3 py-1.5">{row.regione}</td>
                 <td className="px-3 py-1.5 text-slate-400 max-w-[120px] truncate" title={row.citta}>{row.citta || '-'}</td>
                 <td className="px-3 py-1.5 font-mono text-slate-500">{formatDate(row.data_apertura)}</td>
@@ -1446,11 +1912,12 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
               </tr>
             ))}
             {paginatedData.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-8 text-slate-500">Nessun dato trovato</td></tr>
+              <tr><td colSpan={11} className="text-center py-8 text-slate-500">Nessun dato trovato</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
       <div className="flex justify-between items-center mt-6 p-2">
         <span className="text-sm text-slate-500">Pagina {page} di {totalPages || 1}</span>
         <div className="inline-flex gap-2">
@@ -1458,6 +1925,92 @@ const IncidentTable = ({ data, onSelect }: { data: Incident[], onIncidentUpdate?
           <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-slate-700/50 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all">Next <ChevronRight size={16} /></button>
         </div>
       </div>
+
+      {hoveredIncident && createPortal(
+        <div
+          className="fixed z-[9999] w-[480px] bg-[#0f172a] border border-slate-600 rounded-xl shadow-2xl overflow-hidden text-left pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+          style={{
+            top: (hoveredIncident.rect.top + 300 > window.innerHeight)
+              ? hoveredIncident.rect.top - 10
+              : hoveredIncident.rect.top,
+            left: hoveredIncident.rect.right + 10,
+            transform: (hoveredIncident.rect.top + 300 > window.innerHeight) ? 'translateY(-100%)' : 'none'
+          }}
+        >
+          <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm -z-10" />
+          <div className="relative">
+            {/* MAIN TOOLTIP */}
+            {hoveredIncident.type === 'main' && (
+              <>
+                <div className="bg-slate-900/95 p-4 border-b border-slate-700/50">
+                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex justify-between">
+                    <span>Descrizione</span>
+                    <span className="text-blue-400">{hoveredIncident.data.numero}</span>
+                  </p>
+                  <div className="text-xs text-slate-200 leading-relaxed whitespace-normal">
+                    {hoveredIncident.data.descrizione || hoveredIncident.data.breve_descrizione || 'Nessuna descrizione.'}
+                  </div>
+                </div>
+                <div className="p-4 bg-[#0f172a]/95">
+                  <p className="text-[10px] text-blue-400 uppercase font-bold mb-2 flex items-center gap-2">
+                    <Edit3 size={12} /> Note Recenti
+                  </p>
+                  <div className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar p-2 bg-slate-900/50 rounded border border-white/5">
+                    {hoveredIncident.data.note_laser || 'Nessuna nota.'}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* PARTS TOOLTIP */}
+            {hoveredIncident.type === 'parts' && (
+              <>
+                <div className="bg-slate-900/95 p-4 border-b border-slate-700/50">
+                  <p className="text-[10px] text-amber-500 uppercase font-bold mb-1 flex justify-between items-center">
+                    <span>Richiesta Parti</span>
+                    <Settings size={12} />
+                  </p>
+                  <div className="text-xs text-slate-200 leading-relaxed whitespace-normal font-mono bg-slate-800/50 p-2 rounded border border-white/5">
+                    {hoveredIncident.data.parti_richieste ? hoveredIncident.data.parti_richieste.split('|').map((p, i) => (
+                      <div key={i} className="mb-0.5 last:mb-0 text-amber-200/80">• {p}</div>
+                    )) : 'Nessuna parte specificata'}
+                  </div>
+                </div>
+                <div className="p-4 bg-[#0f172a]/95">
+                  <p className="text-[10px] text-blue-400 uppercase font-bold mb-2 flex items-center gap-2">
+                    <Edit3 size={12} /> Note Incident
+                  </p>
+                  <div className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar p-2 bg-slate-900/50 rounded border border-white/5">
+                    {hoveredIncident.data.note_laser || 'Nessuna nota.'}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* DEVICE TOOLTIP */}
+            {hoveredIncident.type === 'device' && (
+              <div className="bg-slate-900/95 p-4">
+                <p className="text-[10px] text-red-500 uppercase font-bold mb-2 flex justify-between items-center">
+                  <span>Richiesta Apparato</span>
+                  <Monitor size={12} />
+                </p>
+                <div className="text-sm font-bold text-white mb-4">
+                  {hoveredIncident.data.hw_model || 'Modello Non Specificato'}
+                </div>
+                <div className="pt-3 border-t border-white/5">
+                  <p className="text-[10px] text-blue-400 uppercase font-bold mb-2 flex items-center gap-2">
+                    <Edit3 size={12} /> Note Incident
+                  </p>
+                  <div className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto custom-scrollbar p-2 bg-slate-900/50 rounded border border-white/5">
+                    {hoveredIncident.data.note_laser || 'Nessuna nota.'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
 
     </div>
   );
@@ -1824,7 +2377,7 @@ const SettingsPage = () => {
   const handleSaveUser = async (updated: UserProfile) => {
     const { error } = await supabase
       .from('profiles')
-      .update({ role: updated.role, regions: updated.regions })
+      .update({ role: updated.role, regions: updated.regions, display_name: updated.display_name })
       .eq('id', updated.id);
 
     if (error) {
@@ -1924,6 +2477,7 @@ const SettingsPage = () => {
 const UserEditModal = ({ user, onClose, onSave }: { user: UserProfile, onClose: () => void, onSave: (u: UserProfile) => void }) => {
   const [role, setRole] = useState(user.role || 'operatore');
   const [regions, setRegions] = useState<string[]>(user.regions || []);
+  const [displayName, setDisplayName] = useState(user.display_name || '');
 
   const toggleRegion = (reg: string) => {
     setRegions(prev =>
@@ -1940,9 +2494,20 @@ const UserEditModal = ({ user, onClose, onSave }: { user: UserProfile, onClose: 
         </div>
 
         <div className="p-6 max-h-[70vh] overflow-y-auto">
+          <div className="mb-4">
+            <label className="block text-xs uppercase text-slate-500 font-bold mb-2">Email (Login)</label>
+            <input disabled value={user.email} className="w-full bg-slate-800 border-none rounded-lg text-slate-400 px-4 py-2 cursor-not-allowed text-sm" />
+          </div>
+
           <div className="mb-6">
-            <label className="block text-xs uppercase text-slate-500 font-bold mb-2">Utente</label>
-            <input disabled value={user.email} className="w-full bg-slate-800 border-none rounded-lg text-slate-400 px-4 py-2 cursor-not-allowed" />
+            <label className="block text-xs uppercase text-slate-500 font-bold mb-2">Nome Utente (Visualizzato)</label>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Es. Mario Rossi"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg text-white px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-600"
+            />
+            <p className="text-[10px] text-slate-500 mt-1">Se compilato, verrà mostrato nella sidebar al posto dell'email.</p>
           </div>
 
           <div className="mb-6">
@@ -1991,7 +2556,7 @@ const UserEditModal = ({ user, onClose, onSave }: { user: UserProfile, onClose: 
         <div className="p-4 bg-slate-900/50 border-t border-slate-700 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Annulla</button>
           <button
-            onClick={() => onSave({ ...user, role, regions })}
+            onClick={() => onSave({ ...user, role, regions, display_name: displayName })}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-blue-500/20 transition-all"
           >
             Salva Modifiche
@@ -2683,7 +3248,7 @@ function App() {
       </div>
 
       {/* Root Level Modal */}
-      {selectedIncident && <IncidentDetailModal incident={selectedIncident} onClose={() => setSelectedIncident(null)} onIncidentUpdate={handleIncidentUpdate} />}
+      {selectedIncident && <IncidentDetailModal incident={selectedIncident} onClose={() => setSelectedIncident(null)} onIncidentUpdate={handleIncidentUpdate} user={userProfile} />}
     </div >
   );
 }
