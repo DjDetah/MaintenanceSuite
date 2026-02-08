@@ -41,11 +41,11 @@ const ItalyMap: React.FC<MapProps> = ({ data, mode }) => {
     // We need to match with our DB data
     const normalizeMapName = (geoName: string): string => {
         let name = geoName.toUpperCase();
-        // Common mismatches
+        // Normalization: Map Name -> DB Name (as per regions table)
         if (name.includes("VALLE D'AOSTA")) return "VALLE D'AOSTA";
-        if (name.includes("TRENTINO")) return "TRENTINO-ALTO ADIGE";
-        if (name.includes("FRIULI")) return "FRIULI-VENEZIA GIULIA";
-        if (name.includes("EMILIA")) return "EMILIA-ROMAGNA";
+        if (name.includes("TRENTINO")) return "TRENTINO"; // DB: "Trentino"
+        if (name.includes("FRIULI")) return "FRIULI VENEZIA GIULIA"; // DB: No hyphens
+        if (name.includes("EMILIA")) return "EMILIA ROMAGNA"; // DB: No hyphens
         return name;
     };
 

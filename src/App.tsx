@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, History } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, History, BarChart2, Award } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -16,6 +16,10 @@ import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, Alert
 } from 'recharts'; */
 
 import ItalyMap from './components/ItalyMap';
+import GhostResolutionModal from './components/GhostResolutionModal';
+import InsightListModal from './components/InsightListModal';
+import ExecutiveDashboard from './components/ExecutiveDashboard';
+import SupplierScorecard from './components/SupplierScorecard';
 
 // --- Supabase Client ---
 // Placeholder config as requested. User must provide VITE_ env vars.
@@ -53,6 +57,7 @@ interface Incident {
   data_consegna?: string;
   gruppo_assegnazione?: string; // EUS_LOCKER_LASER_MICROINF_INC or EUS_LASER_MICROINF_INC
   fornitore?: string;
+  provincia_stato?: string; // Phase 66: Used for Supplier Lookup
   ora_violazione?: string; // Date of SLA violation
   [key: string]: any; // Allow dynamic access
 }
@@ -65,7 +70,7 @@ interface UserProfile {
   display_name?: string;
 }
 
-type ViewMode = 'dashboard' | 'incidents' | 'import' | 'requests' | 'settings';
+type ViewMode = 'dashboard' | 'incidents' | 'import' | 'requests' | 'settings' | 'scorecard';
 
 // --- Utils ---
 const formatDate = (dateString?: string) => {
@@ -124,7 +129,7 @@ const isYesterday = (dateString?: string) => {
 const isSlaBreach = (breach?: boolean) => breach === true;
 
 const isSlaExpiringToday = (i: Incident) => {
-  if (['Chiuso', 'Closed'].includes(i.stato || '')) return false;
+  if (['Chiuso', 'Closed', 'Riassegnato'].includes(i.stato || '')) return false;
   // Assuming 'data_esecuzione' is the SLA deadline field as per previous logic
   return i.data_esecuzione && isToday(i.data_esecuzione);
 };
@@ -180,6 +185,7 @@ const Sidebar = ({
               <span className="ml-3">Backlog & KPI</span>
             </button>
           </li>
+
           <li>
             <button
               onClick={() => setView('incidents')}
@@ -219,7 +225,6 @@ const Sidebar = ({
               <span className="ml-3">Importazione Dati</span>
             </button>
           </li>
-
           <li>
             <a
               href="https://techlab4.vercel.app/"
@@ -379,7 +384,7 @@ interface RegionStat {
   lockers: number;
 }
 
-const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilterChange: (reg: string, status: string) => void }) => {
+const RegionalStatsTable = ({ data, onDrillDown }: { data: Incident[], onDrillDown: (title: string, list: Incident[]) => void }) => {
   const stats = useMemo(() => {
     const map = new Map<string, RegionStat>();
 
@@ -441,20 +446,51 @@ const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilt
           <tbody className="text-xs text-slate-300 divide-y divide-white/5">
             {stats.map(s => {
               if (s.backlog === 0) return null;
-              const expiringToday = data.filter(i => (i.regione === s.region) && isSlaExpiringToday(i)).length;
+
+              const regionIncidents = data.filter(i => (i.regione === s.region));
+              const expiringToday = regionIncidents.filter(i => isSlaExpiringToday(i));
+
+              const getBacklog = () => regionIncidents.filter(i => !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getSuspended = () => regionIncidents.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '') && !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getLockers = () => regionIncidents.filter(i => i.gruppo_assegnazione === 'EUS_LOCKER_LASER_MICROINF_INC' && !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getSlaBreach = () => regionIncidents.filter(i => isSlaBreach(i.violazione_avvenuta) && !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getPlanned = () => regionIncidents.filter(i => i.pianificazione && isToday(i.pianificazione));
+              const getOpenedToday = () => regionIncidents.filter(i => isToday(i.data_apertura));
+              const getClosedToday = () => regionIncidents.filter(i => isToday(i.chiuso));
+
               return (
-                <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => onFilterChange(s.region, '')}>
-                  <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-400 transition-colors">{s.region}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5">{s.backlog}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Sospesi'); }}>{s.suspended}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5">{s.lockers}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-red-500 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Violazioni SLA'); }}>{s.slaBreach}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-orange-400">{expiringToday}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-amber-500">{s.plannedToday}</td>
+                <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer group">
+                  <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-400 transition-colors"
+                    onClick={() => onDrillDown(`Backlog: ${s.region}`, getBacklog())}
+                  >{s.region}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5 hover:bg-slate-500/20"
+                    onClick={() => onDrillDown(`Backlog: ${s.region}`, getBacklog())}
+                  >{s.backlog}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500 cursor-pointer hover:underline hover:bg-yellow-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Sospesi: ${s.region}`, getSuspended()); }}>{s.suspended}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5 hover:bg-slate-500/20"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Lockers: ${s.region}`, getLockers()); }}>{s.lockers}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-red-500 cursor-pointer hover:underline hover:bg-red-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Violazioni SLA: ${s.region}`, getSlaBreach()); }}>{s.slaBreach}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-orange-400 cursor-pointer hover:underline hover:bg-orange-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`In Scadenza Oggi: ${s.region}`, expiringToday); }}>{expiringToday.length}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-amber-500 cursor-pointer hover:underline hover:bg-amber-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Pianificati Oggi: ${s.region}`, getPlanned()); }}>{s.plannedToday}</td>
+
                   <td className="px-3 py-1.5 text-right font-mono text-blue-300 border-l border-white/5">{s.openedYesterday}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-emerald-300">{s.closedYesterday}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-cyan-300 border-l border-white/5 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Aperti Oggi'); }}>{s.openedToday}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-emerald-400 cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); onFilterChange(s.region, 'Chiusi Oggi'); }}>{s.closedToday}</td>
+
+                  <td className="px-3 py-1.5 text-right font-mono text-cyan-300 border-l border-white/5 cursor-pointer hover:underline hover:bg-cyan-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Aperti Oggi: ${s.region}`, getOpenedToday()); }}>{s.openedToday}</td>
+
+                  <td className="px-3 py-1.5 text-right font-mono text-emerald-400 cursor-pointer hover:underline hover:bg-emerald-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Chiusi Oggi: ${s.region}`, getClosedToday()); }}>{s.closedToday}</td>
                 </tr>
               );
             })}
@@ -469,7 +505,7 @@ const RegionalStatsTable = ({ data, onFilterChange }: { data: Incident[], onFilt
 };
 
 // --- Locker Stats Table (Group by City) ---
-const LockerStatsTable = ({ data }: { data: Incident[] }) => {
+const LockerStatsTable = ({ data, onDrillDown }: { data: Incident[], onDrillDown: (title: string, list: Incident[]) => void }) => {
   // 1. Filter only Locker incidents
   const lockerData = data.filter(i => i.gruppo_assegnazione === 'EUS_LOCKER_LASER_MICROINF_INC');
 
@@ -534,20 +570,51 @@ const LockerStatsTable = ({ data }: { data: Incident[] }) => {
           <tbody className="text-xs text-slate-300 divide-y divide-white/5">
             {stats.map(s => {
               if (s.backlog === 0) return null;
-              const expiringToday = lockerData.filter(i => (i.citta === s.region) && isSlaExpiringToday(i)).length; // Filter on lockerData!
+
+              const cityIncidents = lockerData.filter(i => (i.citta === s.region));
+              const expiringToday = cityIncidents.filter(i => isSlaExpiringToday(i));
+
+              const getBacklog = () => cityIncidents.filter(i => !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getSuspended = () => cityIncidents.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '') && !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getLockers = () => cityIncidents.filter(i => !['Chiuso', 'Closed'].includes(i.stato || '')); // All here are lockers
+              const getSlaBreach = () => cityIncidents.filter(i => isSlaBreach(i.violazione_avvenuta) && !['Chiuso', 'Closed'].includes(i.stato || ''));
+              const getPlanned = () => cityIncidents.filter(i => i.pianificazione && isToday(i.pianificazione));
+              const getOpenedToday = () => cityIncidents.filter(i => isToday(i.data_apertura));
+              const getClosedToday = () => cityIncidents.filter(i => isToday(i.chiuso));
+
               return (
-                <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer">
-                  <td className="px-3 py-1.5 font-medium text-white">{s.region}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5">{s.backlog}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500">{s.suspended}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5">{s.lockers}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-red-500">{s.slaBreach}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-orange-400">{expiringToday}</td>
-                  <td className="px-3 py-1.5 text-right font-bold text-amber-500">{s.plannedToday}</td>
+                <tr key={s.region} className="hover:bg-white/5 transition-colors cursor-pointer group">
+                  <td className="px-3 py-1.5 font-medium text-white group-hover:text-blue-400 transition-colors"
+                    onClick={() => onDrillDown(`Locker Backlog: ${s.region}`, getBacklog())}
+                  >{s.region}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-300 bg-slate-500/5 hover:bg-slate-500/20"
+                    onClick={() => onDrillDown(`Locker Backlog: ${s.region}`, getBacklog())}
+                  >{s.backlog}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-yellow-500 cursor-pointer hover:underline hover:bg-yellow-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker Sospesi: ${s.region}`, getSuspended()); }}>{s.suspended}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-400 bg-slate-500/5 hover:bg-slate-500/20"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker Totali: ${s.region}`, getLockers()); }}>{s.lockers}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-red-500 cursor-pointer hover:underline hover:bg-red-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker SLA Violati: ${s.region}`, getSlaBreach()); }}>{s.slaBreach}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-orange-400 cursor-pointer hover:underline hover:bg-orange-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker In Scadenza: ${s.region}`, expiringToday); }}>{expiringToday.length}</td>
+
+                  <td className="px-3 py-1.5 text-right font-bold text-amber-500 cursor-pointer hover:underline hover:bg-amber-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker Pianificati: ${s.region}`, getPlanned()); }}>{s.plannedToday}</td>
+
                   <td className="px-3 py-1.5 text-right font-mono text-blue-300 border-l border-white/5">{s.openedYesterday}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-emerald-300">{s.closedYesterday}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-cyan-300 border-l border-white/5">{s.openedToday}</td>
-                  <td className="px-3 py-1.5 text-right font-mono text-emerald-400">{s.closedToday}</td>
+
+                  <td className="px-3 py-1.5 text-right font-mono text-cyan-300 border-l border-white/5 cursor-pointer hover:underline hover:bg-cyan-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker Aperti Oggi: ${s.region}`, getOpenedToday()); }}>{s.openedToday}</td>
+
+                  <td className="px-3 py-1.5 text-right font-mono text-emerald-400 cursor-pointer hover:underline hover:bg-emerald-500/10"
+                    onClick={(e) => { e.stopPropagation(); onDrillDown(`Locker Chiusi Oggi: ${s.region}`, getClosedToday()); }}>{s.closedToday}</td>
                 </tr>
               );
             })}
@@ -1722,7 +1789,7 @@ const IncidentTable = ({
   insightRules?: InsightRule[]
 }) => {
   const [filter, setFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'in_lavorazione' | 'sospesi' | 'chiusi' | 'violazioni'>('tutti');
+  const [statusFilter, setStatusFilter] = useState<'tutti' | 'backlog' | 'in_lavorazione' | 'sospesi' | 'chiusi' | 'violazioni' | 'riassegnati'>('tutti');
   const [page, setPage] = useState(1);
   const pageSize = 50;
   const [sortConfig, setSortConfig] = useState<{ key: keyof Incident, direction: 'asc' | 'desc' } | null>(null);
@@ -1746,7 +1813,8 @@ const IncidentTable = ({
       in_lavorazione: data.filter(i => ['In Corso', 'In Lavorazione'].includes(i.stato || '')).length,
       suspended: data.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '')).length,
       closed: data.filter(i => ['Chiuso', 'Closed'].includes(i.stato || '')).length,
-      sla_breach: data.filter(i => isSlaBreach(i.violazione_avvenuta)).length
+      sla_breach: data.filter(i => isSlaBreach(i.violazione_avvenuta)).length,
+      riassegnati: data.filter(i => ['Riassegnato'].includes(i.stato || '')).length
     };
   }, [data]);
 
@@ -1769,6 +1837,7 @@ const IncidentTable = ({
     else if (statusFilter === 'sospesi') res = res.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || ''));
     else if (statusFilter === 'chiusi') res = res.filter(i => ['Chiuso', 'Closed'].includes(i.stato || ''));
     else if (statusFilter === 'violazioni') res = res.filter(i => isSlaBreach(i.violazione_avvenuta));
+    else if (statusFilter === 'riassegnati') res = res.filter(i => ['Riassegnato'].includes(i.stato || ''));
 
     // Insight Filter (Specific to this Table, Phase 59)
     if (selectedInsight) {
@@ -1808,7 +1877,7 @@ const IncidentTable = ({
   return (
     <div className="glass-card p-6">
       {/* Filters Cards */}
-      <div className="grid grid-cols-6 gap-2 mb-4 w-full">
+      <div className="grid grid-cols-7 gap-2 mb-4 w-full">
         <div
           onClick={() => setStatusFilter('tutti')}
           className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'tutti' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
@@ -1860,6 +1929,15 @@ const IncidentTable = ({
           <div className="absolute top-1 right-1 opacity-10"><AlertTriangle size={16} className="text-red-400" /></div>
           <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Violazioni SLA</p>
           <h3 className="text-lg md:text-xl font-bold text-red-500 leading-tight">{stats.sla_breach}</h3>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('riassegnati')}
+          className={cn("glass-card p-2 md:p-3 relative overflow-hidden group cursor-pointer transition-all duration-300", statusFilter === 'riassegnati' ? "ring-2 ring-white scale-105 shadow-2xl brightness-125" : "opacity-70 hover:opacity-100")}
+        >
+          <div className="absolute top-1 right-1 opacity-10"><LogOut size={16} className="text-indigo-400" /></div>
+          <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 truncate">Riassegnati</p>
+          <h3 className="text-lg md:text-xl font-bold text-indigo-400 leading-tight">{stats.riassegnati}</h3>
         </div>
       </div>
 
@@ -1919,7 +1997,11 @@ const IncidentTable = ({
           </thead>
           <tbody className="divide-y divide-white/5">
             {paginatedData.map((row) => (
-              <tr key={row.numero} className="bg-transparent hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => onSelect(row)}>
+              <tr key={row.numero}
+                className={cn("bg-transparent hover:bg-white/5 transition-colors cursor-pointer group",
+                  row.stato === 'Riassegnato' ? "opacity-60 grayscale hover:grayscale-0 hover:opacity-100 border-l-2 border-indigo-500/50 pl-2" : ""
+                )}
+                onClick={() => onSelect(row)}>
                 <td
                   className="px-3 py-1.5 font-medium text-white hover:text-blue-300 transition-colors cursor-help"
                   onMouseEnter={(e) => {
@@ -1936,7 +2018,8 @@ const IncidentTable = ({
                       ['In Lavorazione', 'In Corso', 'WIP', 'Assigned', 'Active'].includes(row.stato || '') ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
                         ['Sospeso', 'Suspended', 'Pending'].includes(row.stato || '') ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                           ['Chiuso', 'Closed', 'Resolved'].includes(row.stato || '') ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                            'bg-slate-800 text-slate-500 border-slate-700'
+                            ['Riassegnato'].includes(row.stato || '') ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                              'bg-slate-800 text-slate-500 border-slate-700'
                   )}>
                     {row.stato || 'N/A'}
                   </span>
@@ -2077,7 +2160,11 @@ const IncidentTable = ({
 };
 
 // 5. Importer
-const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
+const ImportPage = ({ refreshData, onGhostDetected, onImportReady }: {
+  refreshData: () => void,
+  onGhostDetected: (ghosts: any[], data: any[]) => void,
+  onImportReady: (data: any[]) => void
+}) => {
   const [logs, setLogs] = useState<string[]>([]);
   const [processing, setProcessing] = useState(false);
 
@@ -2351,16 +2438,45 @@ const ImportPage = ({ refreshData }: { refreshData: () => void }) => {
 
       if (validRows.length === 0) return;
 
-      // UPSERT BATCH
-      const { error } = await supabase.from('incidents').upsert(validRows, { onConflict: 'numero' });
+      // --- GHOST DETECTION Logic (Phase 68) ---
+      // Only for MTZ MAIN files (which define the Backlog)
+      if (fileNameUpper.includes('MTZ') && !fileNameUpper.includes('OUT') && validRows.length > 0) {
+        addLog('Checking for Ghost Incidents (reassigned externally)...');
 
-      if (error) {
-        addLog(`ERROR: ${error.message}`);
-        console.error(error);
-      } else {
-        addLog('Success: Data upserted.');
-        refreshData();
+        // 1. Get Imported IDs
+        const importedIds = new Set(validRows.map(r => r.numero));
+
+        // 2. Fetch DB Candidates (Open/Suspended)
+        // We only care about tickets that ARE CURRENTLY in the Backlog but MISSING from the file.
+        // Statuses to check: Aperto, In Corso, In Lavorazione, Sospeso, Suspended
+        const { data: dbBacklog } = await supabase
+          .from('incidents')
+          .select('numero, regione, stato, descrizione, breve_descrizione')
+          .in('stato', ['Aperto', 'Open', 'In Corso', 'In Lavorazione', 'Sospeso', 'Suspended']);
+
+        if (dbBacklog) {
+          const ghosts: any[] = [];
+          dbBacklog.forEach(dbItem => {
+            // If DB item is NOT in the new file -> It is a Ghost
+            if (!importedIds.has(dbItem.numero)) {
+              ghosts.push(dbItem);
+            }
+          });
+
+          if (ghosts.length > 0) {
+            addLog(`⚠️ Found ${ghosts.length} Ghost Incidents! Pausing for user review.`);
+            // DELEGATE TO APP
+            onGhostDetected(ghosts, validRows);
+            setProcessing(false);
+            return; // EXIT FUNCTION, wait for Modal
+          }
+        }
       }
+
+      // 4. UPSERT Logic (Standard) via App Delegate
+      onImportReady(validRows);
+      addLog('Success: Data ready for upsert.');
+      refreshData();
     };
     reader.readAsArrayBuffer(file);
   };
@@ -2423,15 +2539,41 @@ const SettingsPage = () => {
     setLoading(true);
     const { data, error } = await supabase.from('profiles').select('*').order('email');
     if (error) {
-      console.error('Error fetching profiles:', error);
+      console.error('SettingsPage: Error fetching profiles:', error);
     } else {
       setUsers(data as UserProfile[]);
     }
     setLoading(false);
   };
 
+  // --- Region Management (Phase 74) ---
+  const [regionSettings, setRegionSettings] = useState<any[]>([]);
+
+  const fetchRegionSettings = async () => {
+    const { data, error } = await supabase.from('regions').select('*').order('name');
+    if (error) {
+      console.error("SettingsPage: Error fetching regions:", error);
+    } else {
+      setRegionSettings(data || []);
+    }
+  };
+
+  const toggleRegionVisibility = async (regionName: string, currentVisible: boolean) => {
+    const newVal = !currentVisible;
+    // Optimistic Update
+    setRegionSettings(prev => prev.map(r => r.name === regionName ? { ...r, visible: newVal } : r));
+
+    const { error } = await supabase.from('regions').update({ visible: newVal }).eq('name', regionName);
+    if (error) {
+      console.error("SettingsPage: Error updating region visibility:", error);
+      fetchRegionSettings(); // Revert on error
+      alert("Errore aggiornamento regione: " + error.message);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
+    fetchRegionSettings();
   }, []);
 
   const handleSaveUser = async (updated: UserProfile) => {
@@ -2511,6 +2653,72 @@ const SettingsPage = () => {
               </table>
             </div>
           )}
+        </div>
+
+        {/* Region Visibility Management (Phase 74) - Table View */}
+        <div className="bg-slate-800/40 rounded-xl border border-white/5 overflow-hidden">
+          <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-slate-900/30">
+            <h3 className="font-bold text-slate-200 flex items-center gap-2">
+              <Award size={16} className="text-emerald-400" />
+              Gestione Visibilità Regioni
+            </h3>
+            <button onClick={fetchRegionSettings} className="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+          </div>
+          <div className="p-0">
+            <div className="p-4 bg-slate-900/20 border-b border-white/5 text-xs text-slate-500">
+              Le regioni disabilitate ("Non di Competenza") verranno nascoste nei filtri e segnalate come N.d.C.
+            </div>
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs text-slate-400 uppercase bg-slate-900/50 sticky top-0 z-10 backdrop-blur-sm">
+                  <tr>
+                    <th className="px-6 py-3">Regione</th>
+                    <th className="px-6 py-3 text-center">Stato</th>
+                    <th className="px-6 py-3 text-right">Azione</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {regionSettings.map(r => {
+                    const isVisible = r.visible !== false; // Default true (if null)
+                    return (
+                      <tr key={r.name} className="hover:bg-white/5 transition-colors group">
+                        <td className="px-6 py-3 font-medium text-slate-200">{r.name}</td>
+                        <td className="px-6 py-3 text-center">
+                          <span className={cn("px-2 py-1 rounded text-[10px] font-bold uppercase border inline-flex items-center gap-1",
+                            isVisible
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                          )}>
+                            <div className={cn("w-1.5 h-1.5 rounded-full", isVisible ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-slate-500")}></div>
+                            {isVisible ? 'Attiva' : 'Disabilitata'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          <button
+                            onClick={() => toggleRegionVisibility(r.name, isVisible)}
+                            className={cn("px-3 py-1.5 rounded-md text-xs font-bold border transition-all",
+                              isVisible
+                                ? "bg-slate-800 text-slate-400 border-slate-700 hover:text-red-400 hover:border-red-500/30"
+                                : "bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-500 shadow-lg shadow-emerald-500/20"
+                            )}
+                          >
+                            {isVisible ? 'Disabilita' : 'Attiva Regione'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {regionSettings.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-6 py-8 text-center text-slate-500 italic">
+                        Nessuna regione trovata.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         {/* Other Settings Placeholder */}
@@ -2662,10 +2870,9 @@ const INSIGHT_RULES: InsightRule[] = [
     check: (i) => {
       // Exclude closed
       if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
-      const text = (i.breve_descrizione || '' + i.descrizione || '');
-      // Exclamations, Uppercase emphasis (heuristic: simplified check for "!!!" or "URGENTE")
-      // User asked for "esclamazioni, maiuscolo, punti esclamativi"
-      return text.includes('!!!') || text.includes('URGENTE') || /[A-Z]{5,}/.test(text);
+      const text = ((i.breve_descrizione || '') + ' ' + (i.descrizione || '')).toUpperCase();
+      // Keywords: explicit "URGENTE", "SOLLECITO", or excessive exclamation marks
+      return text.includes('!!!') || text.includes('URGENTE') || text.includes('SOLLECITO');
     },
     message: (c) => `${c}`
   },
@@ -2765,97 +2972,7 @@ const InsightPanel = ({ data, onSelectRule, selectedRule, compact = false, rules
   );
 };
 
-const InsightListModal = ({
-  data,
-  rule,
-  onClose,
-  onSelectIncident
-}: {
-  data: Incident[],
-  rule: InsightRule,
-  onClose: () => void,
-  onSelectIncident: (incident: Incident) => void
-}) => {
-  return (
-    <div className="fixed inset-0 z-[40] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
 
-        {/* Header */}
-        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-800/50">
-          <div className="flex items-center gap-3">
-            <div className={cn("p-2 rounded-lg",
-              rule.type === 'danger' ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
-            )}>
-              <rule.icon size={20} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">Dettaglio Insight</h2>
-              <p className={cn("text-sm font-semibold", rule.type === 'danger' ? "text-red-400" : "text-amber-400")}>
-                {rule.name} • {data.length} Incidenti
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                const ws = XLSX.utils.json_to_sheet(data);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Insight_Data");
-                XLSX.writeFile(wb, `Insight_${rule.name.replace(/ /g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-              }}
-              className="p-2 hover:bg-emerald-500/20 rounded-lg text-emerald-400 hover:text-emerald-300 transition-colors"
-              title="Esporta Excel"
-            >
-              <Download size={20} />
-            </button>
-            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors">
-              <X size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="flex-1 overflow-auto p-0">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-800/80 sticky top-0 z-10 backdrop-blur-md">
-              <tr>
-                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Numero</th>
-                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Regione</th>
-                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item / Modello</th>
-                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pianificazione</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {data.map(incident => (
-                <tr
-                  key={incident.numero}
-                  onClick={() => onSelectIncident(incident)}
-                  className="hover:bg-white/5 transition-colors cursor-pointer group"
-                >
-                  <td className="p-2 text-sm font-mono text-blue-400 font-bold group-hover:underline">{incident.numero}</td>
-                  <td className="p-2 text-sm text-slate-300">{incident.regione || '-'}</td>
-                  <td className="p-2 text-sm text-slate-300">
-                    <div className="flex flex-col">
-                      <span className="font-semibold">{incident.item || incident.category || '-'}</span>
-                      <span className="text-xs text-slate-500">{incident.modello || '-'}</span>
-                    </div>
-                  </td>
-                  <td className="p-2 text-sm text-slate-300">
-                    {incident.pianificazione ? (
-                      <span className="flex items-center gap-1.5 text-emerald-400">
-                        <CalendarPlus size={14} /> {formatDate(incident.pianificazione)}
-                      </span>
-                    ) : '-'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // --- App Main ---
 
@@ -2873,18 +2990,102 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null); // Hoisted State for Modal
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [viewMode, setViewMode] = useState<'operational' | 'executive'>('operational'); // Hoisted State for Modal
+
+  // Phase 66: Region Visibility (Whitelist)
+  const [allowedRegions, setAllowedRegions] = useState<Set<string>>(new Set(REGIONS)); // Default to static list until fetched
 
   // Regional/Status Filters for Dashboard
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
 
+  // Phase 66: Supplier Lookup Map (Provincia -> Fornitore)
+  const [supplierMap, setSupplierMap] = useState<Map<string, string>>(new Map());
+
+  // Phase 68: Ghost Handling State
+  const [isProcessingGhosts, setIsProcessingGhosts] = useState(false);
+  const [ghostIncidents, setGhostIncidents] = useState<any[]>([]);
+  const [pendingImportData, setPendingImportData] = useState<any[] | null>(null);
+
+  // DrillDown Modal State (Phase 69)
+  const [drillDownData, setDrillDownData] = useState<{ title: string, incidents: any[] } | null>(null);
+
+  const handleDrillDown = (title: string, list: any[]) => {
+    setDrillDownData({ title, incidents: list });
+  };
+
+  // --- Handlers for Ghosts ---
+  const ghostDebounce = React.useRef(false);
+
+  const handleGhostDetected = (ghosts: any[], data: any[]) => {
+    if (ghostDebounce.current) return;
+    ghostDebounce.current = true;
+    setTimeout(() => { ghostDebounce.current = false; }, 2000);
+
+    setGhostIncidents(ghosts);
+    setPendingImportData(data);
+    setIsProcessingGhosts(true);
+  };
+
+  const handleImportReady = async (data: any[]) => {
+    // Direct Upsert
+    const { error } = await supabase.from('incidents').upsert(data, { onConflict: 'numero' });
+    if (error) {
+      console.error("Import Error", error);
+      alert("Errore importazione: " + error.message);
+    } else {
+      if (session?.user?.id) await fetchProfile(session.user.id);
+      // alert("Importazione completata con successo!");
+      // Use a small timeout to ensure UI renders/modal closes before alert blocks thread
+      setTimeout(() => alert("Importazione completata con successo!"), 100);
+    }
+  };
+
+  const handleGhostReassign = async (id: string) => {
+    const { error } = await supabase.from('incidents').update({ stato: 'Riassegnato' }).eq('numero', id);
+    if (!error) setGhostIncidents(prev => prev.filter(g => g.numero !== id));
+  };
+
+  const handleGhostReassignAll = async () => {
+    const ids = ghostIncidents.map(g => g.numero);
+    const { error } = await supabase.from('incidents').update({ stato: 'Riassegnato' }).in('numero', ids);
+    if (!error) setGhostIncidents([]);
+  };
+
+  const handleGhostClose = () => {
+    if (pendingImportData) {
+      handleImportReady(pendingImportData);
+    }
+    setIsProcessingGhosts(false);
+    setPendingImportData(null);
+  };
+
   // Theme
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDark]);
+
+  // Phase 66: Load Suppliers Reference
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const { data } = await supabase.from('fornitori').select('provincia, fornitore');
+        if (data) {
+          const map = new Map<string, string>();
+          data.forEach((row: any) => {
+            if (row.provincia && row.fornitore) {
+              map.set(row.provincia.trim().toUpperCase(), row.fornitore);
+            }
+          });
+          setSupplierMap(map);
+        }
+      } catch (e) { console.error("Error loading suppliers:", e); }
+    };
+    loadSuppliers();
+  }, []);
 
   // Auth & Data
   useEffect(() => {
@@ -2893,6 +3094,23 @@ function App() {
       if (session) fetchProfile(session.user.id);
       else setLoading(false);
     });
+
+    // Phase 66: Fetch Allowed Regions
+    const fetchRegions = async () => {
+      try {
+        const { data } = await supabase.from('regions').select('name, visible');
+        if (data) {
+          const visibleRegions = new Set<string>();
+          data.forEach((r: any) => {
+            if (r.visible !== false) { // Default true
+              visibleRegions.add(r.name);
+            }
+          });
+          if (visibleRegions.size > 0) setAllowedRegions(visibleRegions);
+        }
+      } catch (e) { console.error("Error loading regions:", e); }
+    };
+    fetchRegions();
 
     const {
       data: { subscription },
@@ -3056,7 +3274,9 @@ function App() {
         // Only show OPEN tickets that are part of a repetition chain
         check: (i) => {
           if (!i.asset) return false;
-          if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+          const status = (i.stato || '').trim().toUpperCase();
+          // Strict open check
+          if (['CHIUSO', 'CLOSED', 'RESOLVED', 'ANNULLATO', 'CANCELED'].includes(status)) return false;
           return repeatedAssets.has(String(i.asset).trim().toUpperCase());
         },
         message: (c) => `${c}`
@@ -3065,7 +3285,36 @@ function App() {
     return rules;
   }, [repeatedAssets]);
 
-  const dashboardData = useMemo(() => {
+  // Phase 67: N.d.C. Rule (Non di Competenza)
+  // This rule must run on RAW data (or data before Whitelist filter)
+  const allInsightRulesWithNDC = useMemo(() => {
+    const rules = [...allInsightRules];
+    // Only add if we have allowedRegions loaded
+    if (allowedRegions.size > 0) {
+      rules.push({
+        id: 'ndc_warning',
+        name: 'N.d.C.',
+        type: 'danger', // Red Alert
+        icon: AlertTriangle,
+        check: (i) => {
+          // Show if Open AND Region is NOT in allowed list (or explicitly false)
+          const status = (i.stato || '').trim().toUpperCase();
+          if (['CHIUSO', 'CLOSED', 'RESOLVED', 'ANNULLATO', 'CANCELED'].includes(status)) return false;
+
+          const region = i.regione;
+          // If region is missing, or not in allowed set -> It is N.d.C.
+          // Note: allowedRegions contains only visible=true regions.
+          return !region || !allowedRegions.has(region);
+        },
+        message: (c) => `${c}`
+      });
+    }
+    return rules;
+  }, [allInsightRules, allowedRegions]);
+
+  // Base Data: Filtered by User Selections (Status, Supplier, Region)
+  // BUT NOT Filtered by Whitelist (so Insights can see hidden stuff)
+  const baseFilteredData = useMemo(() => {
     let data = incidents;
 
     // Status Filter
@@ -3079,7 +3328,6 @@ function App() {
       } else if (selectedStatus === 'Chiusi Oggi') {
         data = data.filter(i => isToday(i.chiuso));
       } else if (selectedStatus === 'Aperti Oggi') {
-        // User requested Data_ultima_riassegnazione for "Aperti Oggi" context
         data = data.filter(i => isToday(i.data_ultima_riassegnazione));
       } else if (selectedStatus === 'Violazioni SLA') {
         data = data.filter(i => isSlaBreach(i.violazione_avvenuta));
@@ -3091,29 +3339,40 @@ function App() {
       data = data.filter(i => i.fornitore === selectedSupplier);
     }
 
-    // Region Filter (Added Phase 57b)
+    // Region Filter 
     if (selectedRegion) {
       data = data.filter(i => i.regione === selectedRegion);
     }
 
     return data;
-
-
-
-    return data;
   }, [incidents, selectedStatus, selectedSupplier, selectedRegion]);
 
-  // Insight Filtered Data (Specific for Tables)
+  // Dashboard Data: Base Data + WHITELIST (For Maps/Tables)
+  const dashboardData = useMemo(() => {
+    let data = baseFilteredData;
+
+    // Region Visibility Whitelist (Phase 66)
+    if (allowedRegions.size > 0) {
+      data = data.filter(i => i.regione && allowedRegions.has(i.regione));
+    }
+
+    return data;
+  }, [baseFilteredData, allowedRegions]);
+
+  // Insight Filtered Data (Specific for Modal List)
   const insightFilteredData = useMemo(() => {
-    let data = dashboardData;
+    // If N.d.C. is selected, we must use baseFilteredData (to see hidden)
+    // If other rules, we technically could use dashboardData, but consistent to use baseFilteredData for Insights
+    let data = baseFilteredData;
+
     if (selectedInsightRule) {
-      const rule = INSIGHT_RULES.find(r => r.id === selectedInsightRule);
+      const rule = allInsightRulesWithNDC.find(r => r.id === selectedInsightRule);
       if (rule) {
         data = data.filter(rule.check);
       }
     }
     return data;
-  }, [dashboardData, selectedInsightRule]);
+  }, [baseFilteredData, selectedInsightRule, allInsightRulesWithNDC]);
 
   /* const fullyFilteredData = useMemo(() => {
     if (!selectedRegion) return dashboardData;
@@ -3143,9 +3402,9 @@ function App() {
     // States: In Lavorazione (legacy: Aperto, In Corso), Sospeso, Chiuso
     const open = statsData.filter(i => ['Aperto', 'In Corso', 'In Lavorazione'].includes(i.stato || '')).length;
     const suspended = statsData.filter(i => ['Sospeso', 'Suspended'].includes(i.stato || '')).length;
-    const closed = statsData.filter(i => ['Chiuso', 'Closed'].includes(i.stato || '')).length;
+    const closed = statsData.filter(i => ['Chiuso', 'Closed', 'Riassegnato'].includes(i.stato || '')).length;
 
-    const slaBreach = statsData.filter(i => isSlaBreach(i.violazione_avvenuta) && !['Chiuso', 'Closed'].includes(i.stato || '')).length;
+    const slaBreach = statsData.filter(i => isSlaBreach(i.violazione_avvenuta) && !['Chiuso', 'Closed', 'Riassegnato'].includes(i.stato || '')).length;
 
     const openedToday = statsData.filter(i => isToday(i.data_ultima_riassegnazione)).length;
     const closedToday = statsData.filter(i => isToday(i.chiuso)).length;
@@ -3189,9 +3448,17 @@ function App() {
 
     data.forEach(i => {
       const region = i.regione || 'N/D';
-      if (!map.has(region)) {
-        map.set(region, {
-          region,
+      const normalizedRegion = region; // Pass raw DB name (Map handles normalization now)
+
+
+      // Filter: Hide "Non di Competenza" (Check Supplier via Map fallback)
+      // DISABLED per user request (Step 6822)
+      // const supplierName = i.fornitore || supplierMap.get((i.provincia_stato || '').trim().toUpperCase()) || '';
+      // if (supplierName.toLowerCase().includes('competen')) return; This caused issues.
+
+      if (!map.has(normalizedRegion)) {
+        map.set(normalizedRegion, {
+          region: normalizedRegion,
           fil_si: 0, fil_tot: 0,
           pres_si: 0, pres_tot: 0,
           fil_ctrl_viol: 0, fil_ctrl_tot: 0,
@@ -3200,7 +3467,7 @@ function App() {
           sla_breach: 0
         });
       }
-      const s = map.get(region)!;
+      const s = map.get(normalizedRegion)!;
 
       const isClosed = ['Chiuso', 'Closed'].includes(i.stato || '');
 
@@ -3267,10 +3534,23 @@ function App() {
     }
   };
 
+  // Last Update Calculation (Phase 65)
+  const lastUpdateDate = useMemo(() => {
+    if (incidents.length === 0) return null;
+    let maxTime = 0;
+    incidents.forEach(i => {
+      // Use created_at (import time) or possibly updated_at if we want edits.
+      // User asked for "Last update of data file", which typically corresponds to recent `created_at`.
+      const t = new Date(i.created_at || '').getTime();
+      if (!isNaN(t) && t > maxTime) maxTime = t;
+    });
+    return maxTime > 0 ? new Date(maxTime) : null;
+  }, [incidents]);
+
   if (!session) return <AuthForm />;
 
   return (
-    <div className={cn("min-h-screen text-slate-900 dark:text-slate-100 selection:bg-blue-500/30 bg-[#dbe4ee] dark:bg-slate-950 transition-colors duration-300", isDark ? 'dark' : '')}>
+    <div className={cn("min-h-screen text-slate-900 dark:text-slate-100 selection:bg-blue-500/30 bg-[#dbe4ee] dark:bg-slate-900 transition-colors duration-300", isDark ? 'dark' : '')}>
       <Sidebar
         currentView={view}
         setView={setView}
@@ -3282,400 +3562,450 @@ function App() {
 
       <div className={cn("p-4 transition-all", isSidebarOpen ? "lg:ml-64" : "")}>
 
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex items-center mb-8 gap-4">
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition-colors">
             <Menu />
           </button>
           <h1 className="text-3xl font-bold text-slate-200 tracking-tight">Monitor ISP</h1>
+          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/5 ml-4">
+            <button
+              onClick={() => { setView('dashboard'); setViewMode('operational'); }}
+              className={cn("p-1.5 rounded-md transition-all",
+                view === 'dashboard' && viewMode === 'operational' ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+              )}
+              title="Dashboard Operativa"
+            >
+              <LayoutDashboard size={18} />
+            </button>
+            <button
+              onClick={() => { setView('dashboard'); setViewMode('executive'); }}
+              className={cn("p-1.5 rounded-md transition-all",
+                view === 'dashboard' && viewMode === 'executive' ? "bg-purple-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+              )}
+              title="Dashboard Direzionale"
+            >
+              <BarChart2 size={18} />
+            </button>
+            <button
+              onClick={() => setView('scorecard')}
+              className={cn("p-1.5 rounded-md transition-all",
+                view === 'scorecard' ? "bg-amber-500 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+              )}
+              title="Scorecard Fornitori"
+            >
+              <Award size={18} />
+            </button>
+          </div>
+          {lastUpdateDate && (
+            <div className="flex flex-col items-end ml-auto">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Ultimo Aggiornamento</span>
+              <span className="text-xs text-slate-400 font-mono">
+                {lastUpdateDate.toLocaleDateString('it-IT')} {lastUpdateDate.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          )}
         </div>
 
         {view === 'dashboard' && (
           <>
-            {(selectedRegion || selectedStatus) && (
-              <div className="glass-card mb-6 p-4 border-l-4 border-blue-500 bg-blue-500/10 flex justify-between items-center group">
-                {/* ... (keep existing) ... */}
-                <div className="flex items-center gap-6">
-                  {selectedRegion && (
-                    <div className="flex items-center">
-                      <span className="flex h-3 w-3 relative mr-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-                      </span>
-                      <p className="text-white text-sm tracking-wide">Regione: <strong className="text-blue-300 ml-1 font-bold">{selectedRegion}</strong></p>
+            {viewMode === 'executive' ? (
+              <ExecutiveDashboard data={incidents} />
+            ) : (
+              <>
+                {(selectedRegion || selectedStatus) && (
+                  <div className="glass-card mb-6 p-4 border-l-4 border-blue-500 bg-blue-500/10 flex justify-between items-center group">
+                    {/* ... (keep existing) ... */}
+                    <div className="flex items-center gap-6">
+                      {selectedRegion && (
+                        <div className="flex items-center">
+                          <span className="flex h-3 w-3 relative mr-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                          </span>
+                          <p className="text-white text-sm tracking-wide">Regione: <strong className="text-blue-300 ml-1 font-bold">{selectedRegion}</strong></p>
+                        </div>
+                      )}
+                      {selectedStatus && (
+                        <div className="flex items-center">
+                          <span className="flex h-3 w-3 relative mr-3">
+                            <span className="rounded-full h-3 w-3 bg-purple-500"></span>
+                          </span>
+                          <p className="text-white text-sm tracking-wide">Stato: <strong className="text-purple-300 ml-1 font-bold">{selectedStatus}</strong></p>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {selectedStatus && (
-                    <div className="flex items-center">
-                      <span className="flex h-3 w-3 relative mr-3">
-                        <span className="rounded-full h-3 w-3 bg-purple-500"></span>
-                      </span>
-                      <p className="text-white text-sm tracking-wide">Stato: <strong className="text-purple-300 ml-1 font-bold">{selectedStatus}</strong></p>
+                    <div className="flex gap-4">
+                      {selectedRegion && <button onClick={() => setSelectedRegion(null)} className="text-xs text-slate-400 hover:text-white hover:underline transition-all">Reset Regione</button>}
+                      {selectedStatus && <button onClick={() => setSelectedStatus(null)} className="text-xs text-slate-400 hover:text-white hover:underline transition-all">Reset Stato</button>}
+                      <button onClick={() => { setSelectedRegion(null); setSelectedStatus(null); }} className="text-xs font-bold text-red-400 hover:text-red-300 hover:underline transition-all">Reset Tutto</button>
                     </div>
-                  )}
-                </div>
-                <div className="flex gap-4">
-                  {selectedRegion && <button onClick={() => setSelectedRegion(null)} className="text-xs text-slate-400 hover:text-white hover:underline transition-all">Reset Regione</button>}
-                  {selectedStatus && <button onClick={() => setSelectedStatus(null)} className="text-xs text-slate-400 hover:text-white hover:underline transition-all">Reset Stato</button>}
-                  <button onClick={() => { setSelectedRegion(null); setSelectedStatus(null); }} className="text-xs font-bold text-red-400 hover:text-red-300 hover:underline transition-all">Reset Tutto</button>
-                </div>
-              </div>
-            )}
-
-            <KPICards stats={stats} selectedStatus={selectedStatus} onStatusSelect={setSelectedStatus} />
-
-            {/* Insight System (Phase 51) - Updated to Compact (Phase 60) */}
-            <InsightPanel
-              data={dashboardData}
-              onSelectRule={(ruleId) => {
-                setSelectedInsightRule(ruleId);
-                if (ruleId) setShowInsightModal(true);
-              }}
-              selectedRule={selectedInsightRule}
-              compact={true}
-              rules={allInsightRules}
-            />
-
-
-
-            {/* Supplier Filter Cards (Phase 36) */}
-            <div className="flex flex-wrap gap-2 mb-8">
-              <button
-                onClick={() => setSelectedSupplier(null)}
-                className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
-                  !selectedSupplier ? "bg-white text-slate-900 border-white shadow-lg shadow-white/10 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
+                  </div>
                 )}
-              >
-                Tutti i Fornitori
-              </button>
-              {supplierList.map(sup => (
-                <button
-                  key={sup}
-                  onClick={() => setSelectedSupplier(selectedSupplier === sup ? null : sup)}
-                  className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
-                    selectedSupplier === sup ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
-                  )}
-                >
-                  {sup}
-                </button>
-              ))}
-            </div>
 
-            <div className="glass-card mb-8 overflow-hidden flex flex-col">
-              <div className="p-6 pb-0">
-                <h3 className="text-lg font-semibold mb-4 text-white flex items-center gap-2">
-                  <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
-                  {selectedStatus ? `Distribuzione ${selectedStatus}` : 'Distribuzione Backlog'}
-                  <span className="text-xs font-normal text-slate-500 ml-2">(Seleziona Regione)</span>
-                </h3>
-              </div>
-              <div className="flex-1 overflow-hidden p-2">
-                <RegionalStatsTable
-                  data={dashboardData}
-                  onFilterChange={(region, status) => {
-                    setSelectedRegion(region);
-                    if (status) setSelectedStatus(status);
+                <KPICards stats={stats} selectedStatus={selectedStatus} onStatusSelect={setSelectedStatus} />
+
+                {/* Insight System (Phase 51) - Updated to Compact (Phase 60) */}
+                {/* Insight System (Phase 51) - Updated to Compact (Phase 60) */}
+                <InsightPanel
+                  data={baseFilteredData} // Use Base Data (includes N.d.C.)
+                  onSelectRule={(ruleId) => {
+                    setSelectedInsightRule(ruleId);
+                    if (ruleId) setShowInsightModal(true);
                   }}
+                  selectedRule={selectedInsightRule}
+                  compact={true}
+                  rules={allInsightRulesWithNDC}
                 />
 
-                {/* Locker Stats Table */}
-                <LockerStatsTable data={dashboardData} />
-              </div>
-            </div>
 
-            {/* NEW SECTION: Livelli di Servizio */}
-            <div className="glass-card mb-8 overflow-hidden flex flex-col">
-              <div className="p-6 pb-0 mb-4">
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <div className="w-1 h-6 bg-emerald-500 rounded-full"></div>
-                  Livelli di Servizio
-                  <div className="flex gap-2 ml-4">
-                    <select
-                      className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                      value={slaDate.getMonth()}
-                      onChange={(e) => {
-                        const d = new Date(slaDate);
-                        d.setMonth(parseInt(e.target.value));
-                        setSlaDate(d);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
+
+                {/* Supplier Filter Cards (Phase 36) */}
+                <div className="flex flex-wrap gap-2 mb-8">
+                  <button
+                    onClick={() => setSelectedSupplier(null)}
+                    className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                      !selectedSupplier ? "bg-white text-slate-900 border-white shadow-lg shadow-white/10 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    Tutti i Fornitori
+                  </button>
+                  {supplierList.map(sup => (
+                    <button
+                      key={sup}
+                      onClick={() => setSelectedSupplier(selectedSupplier === sup ? null : sup)}
+                      className={cn("px-3 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all",
+                        selectedSupplier === sup ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20 scale-105" : "bg-slate-800/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white"
+                      )}
                     >
-                      {Array.from({ length: 12 }, (_, i) => (
-                        <option key={i} value={i} className="bg-slate-800 text-white">
-                          {new Date(0, i).toLocaleString('it-IT', { month: 'long' }).replace(/^\w/, c => c.toUpperCase())}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
-                      value={slaDate.getFullYear()}
-                      onChange={(e) => {
-                        const d = new Date(slaDate);
-                        d.setFullYear(parseInt(e.target.value));
-                        setSlaDate(d);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {[2024, 2025, 2026].map(y => (
-                        <option key={y} value={y} className="bg-slate-800 text-white">{y}</option>
-                      ))}
-                    </select>
+                      {sup}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="glass-card mb-8 overflow-hidden flex flex-col">
+                  <div className="p-6 pb-0">
+                    <h3 className="text-lg font-semibold mb-4 text-white flex items-center gap-2">
+                      <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
+                      {selectedStatus ? `Distribuzione ${selectedStatus}` : 'Distribuzione Backlog'}
+                      <span className="text-xs font-normal text-slate-500 ml-2">(Seleziona Regione)</span>
+                    </h3>
                   </div>
-                </h3>
-              </div>
+                  <div className="flex-1 overflow-hidden p-2">
+                    <RegionalStatsTable
+                      data={dashboardData}
+                      onDrillDown={handleDrillDown}
+                    />
 
-              <div className="p-6 pt-0 flex flex-col gap-4">
-                {(() => {
-                  // SAFETY: Ensure data exists
-                  if (!dashboardData || !Array.isArray(dashboardData)) return null;
+                    {/* Locker Stats Table */}
+                    <LockerStatsTable
+                      data={dashboardData}
+                      onDrillDown={handleDrillDown}
+                    />
+                  </div>
+                </div>
 
-                  const now = new Date(slaDate);
-                  const currentMonth = now.getMonth();
-                  const currentYear = now.getFullYear();
-
-                  // Base Filter: Has in_sla AND Closed in Current Month
-                  const baseLdsData = dashboardData.filter(i => {
-                    if (!i || !i.in_sla || !i.data_chiusura) return false;
-                    try {
-                      const d = new Date(i.data_chiusura);
-                      if (isNaN(d.getTime())) return false;
-                      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                    } catch (e) { return false; }
-                  });
-
-                  const renderCard = (title: string, filterFn: (i: Incident) => boolean) => {
-                    const subset = baseLdsData.filter(filterFn);
-                    // Strict counting: SI / (SI + NO)
-                    const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
-                    const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
-                    const totalValid = siCount + noCount;
-
-                    if (totalValid === 0) return (
-                      <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
-                        <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
+                {/* NEW SECTION: Livelli di Servizio */}
+                <div className="glass-card mb-8 overflow-hidden flex flex-col">
+                  <div className="p-6 pb-0 mb-4">
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                      <div className="w-1 h-6 bg-emerald-500 rounded-full"></div>
+                      Livelli di Servizio
+                      <div className="flex gap-2 ml-4">
+                        <select
+                          className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                          value={slaDate.getMonth()}
+                          onChange={(e) => {
+                            const d = new Date(slaDate);
+                            d.setMonth(parseInt(e.target.value));
+                            setSlaDate(d);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {Array.from({ length: 12 }, (_, i) => (
+                            <option key={i} value={i} className="bg-slate-800 text-white">
+                              {new Date(0, i).toLocaleString('it-IT', { month: 'long' }).replace(/^\w/, c => c.toUpperCase())}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="bg-slate-700/50 border border-slate-600 text-white text-xs rounded p-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                          value={slaDate.getFullYear()}
+                          onChange={(e) => {
+                            const d = new Date(slaDate);
+                            d.setFullYear(parseInt(e.target.value));
+                            setSlaDate(d);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {[2024, 2025, 2026].map(y => (
+                            <option key={y} value={y} className="bg-slate-800 text-white">{y}</option>
+                          ))}
+                        </select>
                       </div>
-                    );
+                    </h3>
+                  </div>
 
-                    const percentage = (siCount / totalValid) * 100;
-                    const isTargetMet = percentage >= 90;
+                  <div className="p-6 pt-0 flex flex-col gap-4">
+                    {(() => {
+                      // SAFETY: Ensure data exists
+                      if (!dashboardData || !Array.isArray(dashboardData)) return null;
 
-                    return (
-                      <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
-                        isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
-                      )}>
-                        <div className="flex justify-between items-center">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
-                            <span className="text-[10px] text-slate-500">{siCount} su {totalValid} interventi</span>
+                      const now = new Date(slaDate);
+                      const currentMonth = now.getMonth();
+                      const currentYear = now.getFullYear();
+
+                      // Base Filter: Has in_sla AND Closed in Current Month
+                      const baseLdsData = dashboardData.filter(i => {
+                        if (!i || !i.in_sla || !i.data_chiusura) return false;
+
+                        // Filter: Hide "Non di Competenza" (Check Supplier via Map fallback)
+                        // DISABLED per user request (Step 6822)
+                        // const supplierName = i.fornitore || supplierMap.get((i.provincia_stato || '').trim().toUpperCase()) || '';
+                        // if (supplierName.toLowerCase().includes('competen')) return false;
+
+                        try {
+                          const d = new Date(i.data_chiusura);
+                          if (isNaN(d.getTime())) return false;
+                          return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                        } catch (e) { return false; }
+                      });
+
+                      const renderCard = (title: string, filterFn: (i: Incident) => boolean) => {
+                        const subset = baseLdsData.filter(filterFn);
+                        // Strict counting: SI / (SI + NO)
+                        const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                        const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                        const totalValid = siCount + noCount;
+
+                        if (totalValid === 0) return (
+                          <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                            <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
                           </div>
-                          <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
-                            {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  };
+                        );
 
-                  const renderControlloCard = (title: string, filterFn: (i: Incident) => boolean) => {
-                    const subset = baseLdsData.filter(filterFn);
-                    // Denominator: Total (SI + NO)
-                    const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
-                    const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
-                    const totalValid = siCount + noCount;
+                        const percentage = (siCount / totalValid) * 100;
+                        const isTargetMet = percentage >= 90;
 
-                    if (totalValid === 0) return (
-                      <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
-                        <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
-                      </div>
-                    );
-
-                    const violations = subset.filter(i => {
-                      const slaVal = String(i.in_sla || '').trim().toUpperCase();
-                      if (slaVal !== 'SI' && slaVal !== 'NO') return false;
-                      const d = Number(i.durata);
-                      return !isNaN(d) && d > 2640;
-                    }).length;
-
-                    const complianceCount = totalValid - violations;
-                    const percentage = (complianceCount / totalValid) * 100;
-                    const isTargetMet = percentage >= 99; // Target 99%
-
-                    return (
-                      <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
-                        isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
-                      )}>
-                        <div className="flex justify-between items-center">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
-                            <span className="text-[10px] text-slate-500">{complianceCount} su {totalValid} OK</span>
-                            <span className="text-[9px] text-slate-600 mt-0.5">({violations} violazioni)</span>
+                        return (
+                          <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                            isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                          )}>
+                            <div className="flex justify-between items-center">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                                <span className="text-[10px] text-slate-500">{siCount} su {totalValid} interventi</span>
+                              </div>
+                              <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                                {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
+                              </span>
+                            </div>
                           </div>
-                          <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
-                            {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  };
+                        );
+                      };
 
-                  if (baseLdsData.length === 0) return <div className="text-slate-500 italic text-sm w-full">Nessun intervento chiuso nel mese corrente con dati SLA.</div>;
+                      const renderControlloCard = (title: string, filterFn: (i: Incident) => boolean) => {
+                        const subset = baseLdsData.filter(filterFn);
+                        // Denominator: Total (SI + NO)
+                        const siCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                        const noCount = subset.filter(i => i.in_sla && String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                        const totalValid = siCount + noCount;
 
-                  return (
-                    <div className="flex flex-col lg:flex-row gap-8 justify-center">
+                        if (totalValid === 0) return (
+                          <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                            <span className="text-sm text-slate-600 italic">Nessun dato (SI/NO)</span>
+                          </div>
+                        );
 
-                      {/* COLUMN 1: Complessivo */}
-                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 w-full text-left flex items-center justify-between">
-                          Complessivo <span className="text-[10px] opacity-70">(Target 90%)</span>
-                        </h4>
-                        {renderCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
-                        {renderCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
-                      </div>
+                        const violations = subset.filter(i => {
+                          const slaVal = String(i.in_sla || '').trim().toUpperCase();
+                          if (slaVal !== 'SI' && slaVal !== 'NO') return false;
+                          const d = Number(i.durata);
+                          return !isNaN(d) && d > 2640;
+                        }).length;
 
-                      {/* COLUMN 2: Controllo */}
-                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
-                          Controllo <span className="text-[10px] opacity-70">(&le; 2640 min)</span>
-                        </h4>
-                        {renderControlloCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
-                        {renderControlloCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
-                      </div>
+                        const complianceCount = totalValid - violations;
+                        const percentage = (complianceCount / totalValid) * 100;
+                        const isTargetMet = percentage >= 99; // Target 99%
 
-                      {/* COLUMN 3: Regionale (New - Phase 34) */}
-                      <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
-                          Regionale <span className="text-[10px] opacity-70">(% Regioni OK)</span>
-                        </h4>
-                        {/* Calculate Regionale Logic Here:
+                        return (
+                          <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                            isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                          )}>
+                            <div className="flex justify-between items-center">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                                <span className="text-[10px] text-slate-500">{complianceCount} su {totalValid} OK</span>
+                                <span className="text-[9px] text-slate-600 mt-0.5">({violations} violazioni)</span>
+                              </div>
+                              <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                                {percentage === 100 ? '100%' : percentage.toFixed(1) + '%'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      };
+
+                      if (baseLdsData.length === 0) return <div className="text-slate-500 italic text-sm w-full">Nessun intervento chiuso nel mese corrente con dati SLA.</div>;
+
+                      return (
+                        <div className="flex flex-col lg:flex-row gap-8 justify-center">
+
+                          {/* COLUMN 1: Complessivo */}
+                          <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 w-full text-left flex items-center justify-between">
+                              Complessivo <span className="text-[10px] opacity-70">(Target 90%)</span>
+                            </h4>
+                            {renderCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
+                            {renderCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
+                          </div>
+
+                          {/* COLUMN 2: Controllo */}
+                          <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
+                              Controllo <span className="text-[10px] opacity-70">(&le; 2640 min)</span>
+                            </h4>
+                            {renderControlloCard("Filiali (TECNOFIL)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNOFIL')}
+                            {renderControlloCard("Presidi (TECNODIR)", (i) => (i.servizio_hd || '').trim().toUpperCase() === 'TECNODIR')}
+                          </div>
+
+                          {/* COLUMN 3: Regionale (New - Phase 34) */}
+                          <div className="flex flex-col gap-2 flex-1 max-w-sm items-end">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center justify-between w-full">
+                              Regionale <span className="text-[10px] opacity-70">(% Regioni OK)</span>
+                            </h4>
+                            {/* Calculate Regionale Logic Here:
                             1. Group by Region
                             2. Calculate Complessivo (Target 80%)
                             3. Count passing regions
                         */}
-                        {(() => {
-                          const regions = [...new Set(baseLdsData.map(i => i.regione || 'N/D'))];
-                          const totalRegions = regions.length;
+                            {(() => {
+                              const regions = [...new Set(baseLdsData.map(i => i.regione || 'N/D'))];
+                              const totalRegions = regions.length;
 
-                          const renderRegionaleCard = (title: string, service: string) => {
-                            if (totalRegions === 0) return null;
-                            let passingRegions = 0;
+                              const renderRegionaleCard = (title: string, service: string) => {
+                                if (totalRegions === 0) return null;
+                                let passingRegions = 0;
 
-                            regions.forEach(reg => {
-                              const regionSubset = baseLdsData.filter(i => (i.regione || 'N/D') === reg && (i.servizio_hd || '').trim().toUpperCase() === service);
-                              const si = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'SI').length;
-                              const no = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'NO').length;
-                              const total = si + no;
+                                regions.forEach(reg => {
+                                  const regionSubset = baseLdsData.filter(i => (i.regione || 'N/D') === reg && (i.servizio_hd || '').trim().toUpperCase() === service);
+                                  const si = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'SI').length;
+                                  const no = regionSubset.filter(i => String(i.in_sla).trim().toUpperCase() === 'NO').length;
+                                  const total = si + no;
 
-                              // If no tickets for this service in this region, does it pass? 
-                              // Assuming N/A doesn't count against, but also doesn't count for? 
-                              // Let's assume we only count regions with ACTIVE tickets for this service.
-                              if (total > 0) {
-                                const pct = (si / total) * 100;
-                                if (pct >= 80) passingRegions++;
-                              } else {
-                                // Empty region counts as Pass
-                                passingRegions++;
-                              }
-                            });
+                                  // If no tickets for this service in this region, does it pass? 
+                                  // Assuming N/A doesn't count against, but also doesn't count for? 
+                                  // Let's assume we only count regions with ACTIVE tickets for this service.
+                                  if (total > 0) {
+                                    const pct = (si / total) * 100;
+                                    if (pct >= 80) passingRegions++;
+                                  } else {
+                                    // Empty region counts as Pass
+                                    passingRegions++;
+                                  }
+                                });
 
-                            // Denominator: Total Regions (since Empty = Pass logic applies to all)
-                            const denom = totalRegions;
+                                // Denominator: Total Regions (since Empty = Pass logic applies to all)
+                                const denom = totalRegions;
 
-                            // If totalRegions is 0 (no data at all in file), handle gracefully
-                            if (denom === 0) return (
-                              <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
-                                <span className="text-sm text-slate-600 italic">Nessun dato regionale</span>
-                              </div>
-                            );
-
-                            const pct = (passingRegions / denom) * 100;
-                            const isTargetMet = pct >= 100;
-
-                            return (
-                              <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
-                                isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
-                              )}>
-                                <div className="flex justify-between items-center">
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
-                                    <span className="text-[10px] text-slate-500">{passingRegions} su {denom} Regioni OK</span>
+                                // If totalRegions is 0 (no data at all in file), handle gracefully
+                                if (denom === 0) return (
+                                  <div className="glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 border-slate-700 bg-slate-800/30 min-h-[70px]">
+                                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{title}</span>
+                                    <span className="text-sm text-slate-600 italic">Nessun dato regionale</span>
                                   </div>
-                                  <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
-                                    {pct === 100 ? '100%' : pct.toFixed(0) + '%'}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          };
+                                );
 
-                          return (
-                            <>
-                              {renderRegionaleCard("Filiali (TECNOFIL)", 'TECNOFIL')}
-                              {renderRegionaleCard("Presidi (TECNODIR)", 'TECNODIR')}
-                            </>
-                          );
-                        })()}
-                      </div>
+                                const pct = (passingRegions / denom) * 100;
+                                const isTargetMet = pct >= 100;
 
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
+                                return (
+                                  <div className={cn("glass-card p-3 flex flex-col justify-center w-full max-w-[320px] border-l-4 transition-all hover:bg-white/5 min-h-[70px]",
+                                    isTargetMet ? "border-emerald-500 bg-emerald-500/5" : "border-red-500 bg-red-500/5"
+                                  )}>
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</span>
+                                        <span className="text-[10px] text-slate-500">{passingRegions} su {denom} Regioni OK</span>
+                                      </div>
+                                      <span className={cn("text-2xl font-bold", isTargetMet ? "text-emerald-400" : "text-red-500")}>
+                                        {pct === 100 ? '100%' : pct.toFixed(0) + '%'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              };
 
-            {/* NEW SECTION: Livelli di Servizio - Regioni & Mappa (Phase 35) */}
-            <div className="flex flex-col xl:flex-row gap-6 mb-8">
-              {/* Table Section */}
-              <div className="flex-1 xl:max-w-[66%] xl:flex-[2]">
-                <RegionalSLATable stats={regionalStats} />
-              </div>
+                              return (
+                                <>
+                                  {renderRegionaleCard("Filiali (TECNOFIL)", 'TECNOFIL')}
+                                  {renderRegionaleCard("Presidi (TECNODIR)", 'TECNODIR')}
+                                </>
+                              );
+                            })()}
+                          </div>
 
-              {/* Map Section */}
-              <div className="flex-1 glass-card p-4 flex flex-col min-h-[500px] xl:max-w-[34%] xl:flex-[1]">
-                <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/5">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                    <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
-                    Distribuzione Geografica
-                  </h3>
-                  <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/5">
-                    <button
-                      onClick={() => setMapMode('SLA')}
-                      className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                        mapMode === 'SLA' ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
-                      )}
-                    >
-                      SLA Status
-                    </button>
-                    <button
-                      onClick={() => setMapMode('BACKLOG')}
-                      className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                        mapMode === 'BACKLOG' ? "bg-amber-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
-                      )}
-                    >
-                      Backlog (Vol)
-                    </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
-                <div className="flex-1 relative">
-                  <ItalyMap data={regionalStats} mode={mapMode} />
+
+                {/* NEW SECTION: Livelli di Servizio - Regioni & Mappa (Phase 35) */}
+                <div className="flex flex-col xl:flex-row gap-6 mb-8">
+                  {/* Table Section */}
+                  <div className="flex-1 xl:max-w-[66%] xl:flex-[2]">
+                    <RegionalSLATable stats={regionalStats} />
+                  </div>
+
+                  {/* Map Section */}
+                  <div className="flex-1 glass-card p-4 flex flex-col min-h-[500px] xl:max-w-[34%] xl:flex-[1]">
+                    <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/5">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
+                        Distribuzione Geografica
+                      </h3>
+                      <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/5">
+                        <button
+                          onClick={() => setMapMode('SLA')}
+                          className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                            mapMode === 'SLA' ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                          )}
+                        >
+                          SLA Status
+                        </button>
+                        <button
+                          onClick={() => setMapMode('BACKLOG')}
+                          className={cn("px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
+                            mapMode === 'BACKLOG' ? "bg-amber-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+                          )}
+                        >
+                          Backlog (Vol)
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 relative">
+                      <ItalyMap data={regionalStats} mode={mapMode} />
+                    </div>
+                    <div className="mt-4 flex gap-4 justify-center text-[10px] text-slate-500 font-mono">
+                      {mapMode === 'SLA' ? (
+                        <>
+                          <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Target Raggiunto</div>
+                          <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Sotto Soglia</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1 bg-gradient-to-r from-cyan-900 to-cyan-400 w-24 h-2 rounded opacity-80"></div> Volume
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-4 flex gap-4 justify-center text-[10px] text-slate-500 font-mono">
-                  {mapMode === 'SLA' ? (
-                    <>
-                      <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Target Raggiunto</div>
-                      <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Sotto Soglia</div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-1 bg-gradient-to-r from-cyan-900 to-cyan-400 w-24 h-2 rounded opacity-80"></div> Volume
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
 
 
+              </>
+            )}
           </>
         )}
 
@@ -3696,7 +4026,13 @@ function App() {
 
         {view === 'requests' && <PartsRequestTable data={incidents} onSelect={setSelectedIncident} />}
 
-        {view === 'import' && <ImportPage refreshData={() => session && fetchProfile(session.user.id)} />}
+        {view === 'scorecard' && <SupplierScorecard data={incidents} />}
+
+        {view === 'import' && <ImportPage
+          refreshData={() => session && fetchProfile(session.user.id)}
+          onGhostDetected={handleGhostDetected}
+          onImportReady={handleImportReady}
+        />}
 
         {view === 'settings' && <SettingsPage />}
       </div>
@@ -3704,14 +4040,44 @@ function App() {
       {/* Root Level Modal */}
       {selectedIncident && <IncidentDetailModal incident={selectedIncident} onClose={() => setSelectedIncident(null)} onIncidentUpdate={handleIncidentUpdate} user={userProfile} />}
 
+      {/* Ghost Resolution Modal (Phase 68) */}
+      {isProcessingGhosts && (
+        <GhostResolutionModal
+          ghosts={ghostIncidents}
+          onReassign={handleGhostReassign}
+          onReassignAll={handleGhostReassignAll}
+          onClose={handleGhostClose}
+        />
+      )}
+
+      {/* DrillDown Modal (Phase 69) */}
+      {/* DrillDown Modal (Phase 69 - Refactored to use InsightListModal) */}
+      {drillDownData && (
+        <InsightListModal
+          data={drillDownData.incidents}
+          title={drillDownData.title}
+          subtitle={`${drillDownData.incidents.length} segnalazioni`}
+          icon={List}
+          colorTheme="blue"
+          onClose={() => setDrillDownData(null)}
+          onSelectIncident={(incident) => {
+            setDrillDownData(null);
+            setSelectedIncident(incident);
+          }}
+        />
+      )}
+
       {/* Insight List Modal (Phase 53) */}
       {showInsightModal && selectedInsightRule && (
         <InsightListModal
           data={insightFilteredData}
-          rule={allInsightRules.find(r => r.id === selectedInsightRule)!}
+          title={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.name || 'Insight'}
+          subtitle="Analisi Dettagliata"
+          icon={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.icon || AlertTriangle}
+          colorTheme={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.type || 'warning'} // Cast to correct type if needed, but 'danger'/'warning' match.
           onClose={() => { setShowInsightModal(false); setSelectedInsightRule(null); }}
           onSelectIncident={(incident) => {
-            // setShowInsightModal(false); // STACKING: Keep List open behind Detail
+            // setShowInsightModal(false); // STACKING
             setSelectedIncident(incident);
           }}
         />

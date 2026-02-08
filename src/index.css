@@ -48,10 +48,10 @@
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 antialiased;
-    /* Deep Gradient Background */
-    background-image: radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
-      radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%);
+    @apply bg-slate-900 text-slate-100 antialiased;
+    /* Deep Gradient Background - Lightened ~10% */
+    background-image: radial-gradient(at 0% 0%, hsla(253, 16%, 17%, 1) 0, transparent 50%),
+      radial-gradient(at 50% 0%, hsla(225, 39%, 40%, 1) 0, transparent 50%);
     background-attachment: fixed;
     background-size: cover;
   }
