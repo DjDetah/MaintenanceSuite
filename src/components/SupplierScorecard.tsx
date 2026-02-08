@@ -1,22 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    ScatterChart, Scatter, ZAxis, Cell
-} from 'recharts';
-import { Trophy, Award, Medal, TrendingUp, ChevronLeft, ChevronRight, List } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+import { Trophy, Award, Medal, ChevronLeft, ChevronRight, List } from 'lucide-react';
 
 // ... (rest of imports)
 
 // Skipping unchanged lines ...
 
-<Tooltip
-    cursor={{ strokeDasharray: '3 3' }}
-    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', fontSize: '12px' }}
-    formatter={(value: any, name: any) => {
-        if (name === 'SLA %') return [`${value}%`, name];
-        return [value, name];
-    }}
-/>
+
 
 interface Incident {
     numero: string;

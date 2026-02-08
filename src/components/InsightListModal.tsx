@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import { X, Download, CalendarPlus, Edit3, Settings, Monitor, List, Activity } from 'lucide-react';
+import { X, Download, CalendarPlus, Edit3, List } from 'lucide-react';
 
 // Replicating needed types from App.tsx or importing them if I could, but for now I'll redefine Incident interface relative to display needs
 // Ideally checking strict types, but for a component file, loose typing on Incident is acceptable or we export Incident from a central types file.

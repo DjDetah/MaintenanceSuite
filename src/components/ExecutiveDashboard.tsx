@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     AreaChart, Area, ComposedChart, Line
 } from 'recharts';
 import { Activity, AlertTriangle, TrendingUp, Users, MapPin, CheckCircle, ChevronLeft, ChevronRight, TrendingDown, Minus } from 'lucide-react';
@@ -396,7 +396,7 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                                 <Tooltip
                                     cursor={{ fill: '#334155', opacity: 0.2 }}
                                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', fontSize: '12px' }}
-                                    formatter={(value: any, name: string) => {
+                                    formatter={(value: any, name: any) => {
                                         if (name === '% Violazioni' && typeof value === 'number') return [`${formatPercentage(value)}%`, name];
                                         return [value, name];
                                     }}
@@ -434,12 +434,12 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                                     <td className="px-4 py-3 text-center text-slate-400">{r.total}</td>
                                     <td className="px-4 py-3 text-right">
                                         <div className="flex items-center justify-end gap-2">
-                                            <span className={`font-bold ${parseFloat(r.compliance as string) < 90 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                            <span className={`font-bold ${Number(r.compliance) < 90 ? 'text-red-400' : 'text-emerald-400'}`}>
                                                 {formatPercentage(Number(r.compliance))}%
                                             </span>
                                             <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
                                                 <div
-                                                    className={`h-full rounded-full ${parseFloat(r.compliance as string) < 90 ? 'bg-red-500' : 'bg-emerald-500'}`}
+                                                    className={`h-full rounded-full ${Number(r.compliance) < 90 ? 'bg-red-500' : 'bg-emerald-500'}`}
                                                     style={{ width: `${r.compliance}%` }}
                                                 />
                                             </div>

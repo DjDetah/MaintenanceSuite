@@ -3001,8 +3001,8 @@ function App() {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
 
-  // Phase 66: Supplier Lookup Map (Provincia -> Fornitore)
-  const [supplierMap, setSupplierMap] = useState<Map<string, string>>(new Map());
+  // Phase 66: Supplier Lookup Map (Provincia -> Fornitore) - Removed unused state
+  // const [supplierMap, setSupplierMap] = useState<Map<string, string>>(new Map());
 
   // Phase 68: Ghost Handling State
   const [isProcessingGhosts, setIsProcessingGhosts] = useState(false);
@@ -3068,24 +3068,24 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDark]);
 
-  // Phase 66: Load Suppliers Reference
-  useEffect(() => {
-    const loadSuppliers = async () => {
-      try {
-        const { data } = await supabase.from('fornitori').select('provincia, fornitore');
-        if (data) {
-          const map = new Map<string, string>();
-          data.forEach((row: any) => {
-            if (row.provincia && row.fornitore) {
-              map.set(row.provincia.trim().toUpperCase(), row.fornitore);
-            }
-          });
-          setSupplierMap(map);
-        }
-      } catch (e) { console.error("Error loading suppliers:", e); }
-    };
-    loadSuppliers();
-  }, []);
+  // Phase 66: Load Suppliers Reference - Removed unused logic
+  // useEffect(() => {
+  //   const loadSuppliers = async () => {
+  //     try {
+  //       const { data } = await supabase.from('fornitori').select('provincia, fornitore');
+  //       if (data) {
+  //         const map = new Map<string, string>();
+  //         data.forEach((row: any) => {
+  //           if (row.provincia && row.fornitore) {
+  //             map.set(row.provincia.trim().toUpperCase(), row.fornitore);
+  //           }
+  //         });
+  //         // setSupplierMap(map);
+  //       }
+  //     } catch (e) { console.error("Error loading suppliers:", e); }
+  //   };
+  //   loadSuppliers();
+  // }, []);
 
   // Auth & Data
   useEffect(() => {
