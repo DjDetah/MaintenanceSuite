@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
     Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    AreaChart, Area, ComposedChart, Line
+    AreaChart, Area, ComposedChart, Line, LineChart, ReferenceLine, Legend
 } from 'recharts';
 import { Activity, AlertTriangle, TrendingUp, Users, MapPin, CheckCircle, ChevronLeft, ChevronRight, TrendingDown, Minus } from 'lucide-react';
 
@@ -20,10 +20,57 @@ interface Incident {
     [key: string]: any;
 }
 
-const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
+const ExecutiveDashboard = ({ data, supabaseClient }: { data: Incident[], supabaseClient: any }) => {
 
     // 1. Default Current Month for Overview
     const [selectedDate, setSelectedDate] = useState(new Date());
+    const [backlogHistory, setBacklogHistory] = useState<any[]>([]);
+
+    useEffect(() => {
+        const fetchBacklog = async () => {
+            if (!supabaseClient) return;
+            const startStr = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).toISOString().split('T')[0];
+            const endStr = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).toISOString().split('T')[0]; // last day of month
+
+            // Query daily_backlog_snapshots
+            const { data: snaps, error } = await supabaseClient
+                .from('daily_backlog_snapshots')
+                .select('*')
+                .gte('snapshot_date', startStr)
+                .lte('snapshot_date', endStr)
+                .order('snapshot_date');
+
+            if (error) {
+                console.error("Error fetching backlog snapshots:", error);
+                return;
+            }
+
+            if (snaps) {
+                // Aggregate by date (regions summed up)
+                const dailyMap = new Map<string, { date: string, total: number, suspended: number, active: number }>();
+
+                snaps.forEach((s: any) => {
+                    const d = s.snapshot_date;
+                    if (!dailyMap.has(d)) dailyMap.set(d, { date: d, total: 0, suspended: 0, active: 0 });
+                    const entry = dailyMap.get(d)!;
+                    entry.total += (s.total_backlog || 0);
+                    entry.suspended += (s.suspended_count || 0);
+                    // Active (In Lavorazione) = Total - Suspended
+                    entry.active = entry.total - entry.suspended;
+                });
+
+                // Convert to array and sort
+                const history = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+                setBacklogHistory(history);
+            } else {
+                setBacklogHistory([]);
+            }
+        };
+
+        fetchBacklog();
+    }, [selectedDate, supabaseClient]);
+
+
 
     const adjustMonth = (delta: number) => {
         const d = new Date(selectedDate);
@@ -122,43 +169,51 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
     };
 
     const currentStats = useMemo(() => calculateStats(selectedDate), [data, selectedDate]);
-    const prevDate = new Date(selectedDate);
-    prevDate.setMonth(prevDate.getMonth() - 1);
+    const prevDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, 1);
     const prevStats = useMemo(() => calculateStats(prevDate), [data, prevDate]);
 
-
-    // Trend Data (Daily for Selected Month)
+    // Trend Data (Daily in Month) - RESTORED
     const trendData = useMemo(() => {
         const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
-        const stats = new Array(daysInMonth).fill(0).map((_, i) => ({
-            day: i + 1,
-            date: new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i + 1).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }),
-            count: 0,
-            opened: 0,
-            closed: 0
-        }));
+        const stats = [];
 
-        data.forEach(i => {
-            // Opened
-            if (i.data_apertura) {
-                const d = new Date(i.data_apertura);
-                if (!isNaN(d.getTime()) && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear()) {
-                    stats[d.getDate() - 1].opened++;
-                }
-            }
-            // Closed
-            if (i.data_chiusura) {
-                const d = new Date(i.data_chiusura);
-                if (!isNaN(d.getTime()) && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear()) {
-                    stats[d.getDate() - 1].closed++;
-                }
-            }
-        });
+        for (let i = 1; i <= daysInMonth; i++) {
+            const dateObj = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
+            const dateStr = dateObj.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+
+            // Opened on this day
+            const opened = data.filter(inc => {
+                if (!inc.data_apertura) return false;
+                const d = new Date(inc.data_apertura);
+                return d.getDate() === i && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
+            }).length;
+
+            // Closed on this day
+            const closed = data.filter(inc => {
+                if (!inc.data_chiusura) return false;
+                const d = new Date(inc.data_chiusura);
+                return d.getDate() === i && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
+            }).length;
+
+            stats.push({
+                day: i,
+                date: dateStr,
+                opened,
+                closed
+            });
+        }
+
+        // Filter out future dates if current month
+        const now = new Date();
+        if (selectedDate.getMonth() === now.getMonth() && selectedDate.getFullYear() === now.getFullYear()) {
+            return stats.filter(s => s.day <= now.getDate());
+        }
+
         return stats;
     }, [data, selectedDate]);
 
 
-    // Supplier Data (Top 5 by Volume in Month)
+    // Supplier Data (Top 5 by Volume in Month) - RESTORED
     const supplierData = useMemo(() => {
         const stats: Record<string, { opened: number, closed: number, breaches: number }> = {};
 
@@ -197,30 +252,92 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
             .slice(0, 5);
     }, [data, selectedDate]);
 
-    // Region Data (SLA Breaches in Month)
+
+    // Trend Data (Daily SLA %) - Calculated from existing Data
+    const slaTrendData = useMemo(() => {
+        const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
+        const stats = [];
+
+        for (let i = 1; i <= daysInMonth; i++) {
+            const dateObj = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
+            const dateStr = dateObj.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+
+            const closedOnDay = data.filter(inc => {
+                if (!inc.data_chiusura) return false;
+                const d = new Date(inc.data_chiusura);
+                return d.getDate() === i && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
+            });
+
+            const validSla = closedOnDay.filter(inc => ['SI', 'NO'].includes((inc.in_sla || '').trim().toUpperCase()));
+            let slaPct = 100; // Default if no tickets? Or null? Let's say 100 or 0? 
+            // If no tickets closed, SLA is technically N/A. Let's start at 100 or null. 100 looks better for "no violations".
+            if (validSla.length > 0) {
+                const met = validSla.filter(inc => (inc.in_sla || '').trim().toUpperCase() === 'SI').length;
+                slaPct = (met / validSla.length) * 100;
+            }
+
+            stats.push({
+                day: i,
+                date: dateStr,
+                sla: Number(slaPct.toFixed(1))
+            });
+        }
+
+        // Filter out future dates if current month
+        const now = new Date();
+        if (selectedDate.getMonth() === now.getMonth() && selectedDate.getFullYear() === now.getFullYear()) {
+            return stats.filter(s => s.day <= now.getDate());
+        }
+
+        return stats;
+    }, [data, selectedDate]);
+
+
+    // Region Data (Expanded - All Regions + Averages)
     const regionData = useMemo(() => {
-        const stats: Record<string, { total: number, breaches: number }> = {};
-        // Use Closed in Month logic for SLA
+        const stats: Record<string, { total: number, breaches: number, opened: number, closed: number }> = {};
+
+        // 1. Breaches & Total Closed (from Closed in Month)
         data.filter(i => {
             if (!i.data_chiusura) return false;
             const d = new Date(i.data_chiusura);
             return !isNaN(d.getTime()) && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
         }).forEach(i => {
             const region = i.regione || 'Unknown';
-            if (!stats[region]) stats[region] = { total: 0, breaches: 0 };
+            if (!stats[region]) stats[region] = { total: 0, breaches: 0, opened: 0, closed: 0 };
             stats[region].total++;
-            if ((i.in_sla || '').trim().toUpperCase() === 'NO') stats[region].breaches++;
+            stats[region].closed++; // Same as total closed
+            const sla = (i.in_sla || '').trim().toUpperCase();
+            // Check formatted string 'NO' OR boolean/string 'true' for violation
+            if (sla === 'NO' || i.violazione_avvenuta === true || String(i.violazione_avvenuta).toUpperCase() === 'TRUE') {
+                stats[region].breaches++;
+            }
         });
+
+        // 2. Opened (from Opened in Month)
+        data.filter(i => {
+            if (!i.data_apertura) return false;
+            const d = new Date(i.data_apertura);
+            return !isNaN(d.getTime()) && d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
+        }).forEach(i => {
+            const region = i.regione || 'Unknown';
+            if (!stats[region]) stats[region] = { total: 0, breaches: 0, opened: 0, closed: 0 };
+            stats[region].opened++;
+        });
+
+        const isCurrentMonth = selectedDate.getMonth() === new Date().getMonth() && selectedDate.getFullYear() === new Date().getFullYear();
+        const daysDivisor = isCurrentMonth ? Math.max(1, new Date().getDate()) : new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
 
         return Object.entries(stats)
             .map(([name, s]) => ({
                 name,
                 breaches: s.breaches,
                 total: s.total,
-                compliance: s.total > 0 ? ((s.total - s.breaches) / s.total * 100) : 100
+                compliance: s.total > 0 ? ((s.total - s.breaches) / s.total * 100) : 100,
+                avgOpen: s.opened / daysDivisor,
+                avgClose: s.closed / daysDivisor
             }))
-            .sort((a, b) => b.breaches - a.breaches)
-            .slice(0, 5);
+            .sort((a, b) => b.breaches - a.breaches); // Sort by breaches desc, NO SLICE
     }, [data, selectedDate]);
 
     const formatPercentage = (value: number) => {
@@ -304,7 +421,7 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                 {renderSlaSplitCard("SLA Geografico", currentStats.filialiGeo, currentStats.presidiGeo, prevStats.filialiGeo, prevStats.presidiGeo, 100)}
             </div>
 
-            {/* Row 2: KPIs & Volume (4 columns) */}
+            {/* Row 2: KPIs & Volume (4 columns) - RESTORED */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 {/* 1. Ticket Aperti (Month) */}
                 <div className="glass-card p-3 relative overflow-hidden group hover:border-blue-500/30 transition-colors">
@@ -347,7 +464,83 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                 </div>
             </div>
 
-            {/* Charts Row 1 */}
+            {/* Row 2: Charts Row (Replaces Cards/Trend) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* 1. Backlog Trend Chart (Area) */}
+                <div className="glass-card p-4 h-[350px] flex flex-col">
+                    <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                        <Activity size={16} className="text-blue-400" />
+                        Andamento Backlog ({getMonthName(selectedDate)})
+                    </h3>
+                    {backlogHistory.length > 0 ? (
+                        <div style={{ width: '100%', height: 270 }}>
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                                <AreaChart data={backlogHistory}>
+                                    <defs>
+                                        <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                        </linearGradient>
+                                        <linearGradient id="colorSuspended" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#eab308" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="#eab308" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+                                    <XAxis
+                                        dataKey="date"
+                                        stroke="#64748b"
+                                        fontSize={10}
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(val) => {
+                                            const d = new Date(val);
+                                            return `${d.getDate()}/${d.getMonth() + 1}`;
+                                        }}
+                                        minTickGap={30}
+                                    />
+                                    <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', fontSize: '12px' }}
+                                        labelFormatter={(val) => new Date(val).toLocaleDateString('it-IT')}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                                    <Area type="monotone" dataKey="active" stroke="#8b5cf6" fill="url(#colorActive)" name="In Lavorazione" strokeWidth={2} />
+                                    <Area type="monotone" dataKey="suspended" stroke="#eab308" fill="url(#colorSuspended)" name="Sospesi" strokeWidth={2} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex items-center justify-center text-slate-500 italic text-sm">
+                            Nessun dato storico disponibile per questo mese.
+                        </div>
+                    )}
+                </div>
+
+                {/* 2. SLA Trend Chart (Line) */}
+                <div className="glass-card p-4 h-[350px] flex flex-col">
+                    <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                        <TrendingUp size={16} className="text-emerald-400" />
+                        Andamento SLA Medio ({getMonthName(selectedDate)})
+                    </h3>
+                    <div style={{ width: '100%', height: 270 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                            <LineChart data={slaTrendData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+                                <XAxis dataKey="date" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} minTickGap={30} />
+                                <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} />
+                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', fontSize: '12px' }} />
+                                <ReferenceLine y={90} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.5} label={{ value: "Target 90%", fill: "#10b981", fontSize: 10, position: 'insideTopRight' }} />
+                                <Line type="monotone" dataKey="sla" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} name="% SLA" />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+            </div>
+
+            {/* Row 3: Original Charts (Restored) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Trend Chart - Daily in Month (Open vs Closed) */}
                 <div className="glass-card p-4 h-[350px] flex flex-col">
@@ -356,7 +549,7 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                         Andamento Giornaliero: Aperti vs Chiusi
                     </h3>
                     <div style={{ width: '100%', height: 270 }}>
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <AreaChart data={trendData}>
                                 <defs>
                                     <linearGradient id="colorOpened" x1="0" y1="0" x2="0" y2="1">
@@ -374,6 +567,7 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', fontSize: '12px' }}
                                 />
+                                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
                                 <Area type="monotone" dataKey="opened" stroke="#60a5fa" fillOpacity={1} fill="url(#colorOpened)" name="Aperti" strokeWidth={2} />
                                 <Area type="monotone" dataKey="closed" stroke="#10b981" fillOpacity={0.6} fill="url(#colorClosed)" name="Chiusi" strokeWidth={2} />
                             </AreaChart>
@@ -388,7 +582,7 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                         Top 5 Fornitori: Volume e % Violazioni
                     </h3>
                     <div style={{ width: '100%', height: 270 }}>
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                             <ComposedChart data={supplierData} layout="vertical" margin={{ left: 10, right: 20 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} opacity={0.3} />
                                 <XAxis type="number" stroke="#64748b" fontSize={10} hide />
@@ -410,19 +604,21 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                 </div>
             </div>
 
-            {/* Regional Criticality */}
+            {/* Regional Criticality (All Regions + New Columns) */}
             <div className="glass-card p-6">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                     <MapPin size={20} className="text-red-400" />
-                    Regioni con Più Violazioni SLA ({getMonthName(selectedDate)})
+                    Analisi Regionale ({getMonthName(selectedDate)})
                 </h3>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[500px]">
                     <table className="w-full text-sm text-left text-slate-300">
-                        <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 border-b border-slate-700">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 border-b border-slate-700 sticky top-0 backdrop-blur-md">
                             <tr>
                                 <th className="px-4 py-3">Regione</th>
                                 <th className="px-4 py-3 text-center">Violazioni</th>
                                 <th className="px-4 py-3 text-center">Totale Chiusi</th>
+                                <th className="px-4 py-3 text-center text-blue-400">Media Aperture</th>
+                                <th className="px-4 py-3 text-center text-emerald-400">Media Chiusure</th>
                                 <th className="px-4 py-3 text-right">SLA Compliance</th>
                             </tr>
                         </thead>
@@ -432,6 +628,8 @@ const ExecutiveDashboard = ({ data }: { data: Incident[] }) => {
                                     <td className="px-4 py-3 font-medium text-white">{r.name}</td>
                                     <td className="px-4 py-3 text-center text-red-400 font-bold">{r.breaches}</td>
                                     <td className="px-4 py-3 text-center text-slate-400">{r.total}</td>
+                                    <td className="px-4 py-3 text-center text-slate-300 font-mono">{r.avgOpen.toFixed(1)}</td>
+                                    <td className="px-4 py-3 text-center text-slate-300 font-mono">{r.avgClose.toFixed(1)}</td>
                                     <td className="px-4 py-3 text-right">
                                         <div className="flex items-center justify-end gap-2">
                                             <span className={`font-bold ${Number(r.compliance) < 90 ? 'text-red-400' : 'text-emerald-400'}`}>

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 
-import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, History, BarChart2, Award } from 'lucide-react';
+import { LayoutDashboard, FileSpreadsheet, Menu, X, LogOut, AlertTriangle, AlertCircle, Lightbulb, CheckCircle, Clock, Table as TableIcon, Upload, Edit3, Settings, Save, Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Download, CalendarPlus, List, Activity, Monitor, History, BarChart2, Award, TrendingUp, MapPin } from 'lucide-react';
 /* import {
   BarChart,
   Bar,
@@ -20,6 +20,7 @@ import GhostResolutionModal from './components/GhostResolutionModal';
 import InsightListModal from './components/InsightListModal';
 import ExecutiveDashboard from './components/ExecutiveDashboard';
 import SupplierScorecard from './components/SupplierScorecard';
+import TrendAnalysisPage from './components/TrendAnalysisPage';
 
 // --- Supabase Client ---
 // Placeholder config as requested. User must provide VITE_ env vars.
@@ -70,7 +71,7 @@ interface UserProfile {
   display_name?: string;
 }
 
-type ViewMode = 'dashboard' | 'incidents' | 'import' | 'requests' | 'settings' | 'scorecard';
+type ViewMode = 'dashboard' | 'incidents' | 'import' | 'requests' | 'settings' | 'scorecard' | 'trends';
 
 // --- Utils ---
 const formatDate = (dateString?: string) => {
@@ -1032,7 +1033,7 @@ const IncidentDetailModal = ({ incident, onClose, onIncidentUpdate, user }: { in
   if (!incident) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex justify-center items-start pt-8 pb-8 px-4 animate-in fade-in duration-200 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex justify-center items-start pt-8 pb-8 px-4 animate-in fade-in duration-200 overflow-y-auto" onClick={onClose}>
       <div className="bg-[#0f172a] w-full max-w-6xl h-auto max-h-[90vh] rounded-2xl overflow-hidden flex flex-col border border-slate-700 shadow-2xl relative" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -2289,6 +2290,9 @@ const ImportPage = ({ refreshData, onGhostDetected, onImportReady }: {
       // FILE 2: AAA... MTZ -> PRINCIPALE
       else if (fileNameUpper.includes('MTZ') && !fileNameUpper.includes('OUT')) {
         addLog('Detected Type: MTZ MAIN');
+        if (json.length > 0) {
+          console.log('DEBUG: Excel Valid Keys:', JSON.stringify(Object.keys(json[0])));
+        }
         // Source fields: Numero, Breve descrizione, Stato, Data apertura, etc...
         // Map keys to snake_case db columns if needed, assuming XLSX headers match user spec
         normalizedBuffer = json.map(row => ({
@@ -2300,7 +2304,9 @@ const ImportPage = ({ refreshData, onGhostDetected, onImportReady }: {
           data_pianificazione_intervento: processExcelDate(row['Data di pianificazione intervento']),
           in_carico_a: row['In carico a'],
           beneficiario: row['Beneficiario'],
+          in_sla: row['In SLA'], // ADDED MAPPING
           indirizzo_intervento: row['Indirizzo di Intervento'],
+          indirizzo_beneficiario: row['Indirizzo beneficiario'], // NEW MAPPING
           recall: row['Recall'],
           data_aggiornamento: processExcelDate(row['Data aggiornamento']),
           item: row['Item'] || row['item'] || row['ITEM'],
@@ -2310,7 +2316,8 @@ const ImportPage = ({ refreshData, onGhostDetected, onImportReady }: {
           provincia_stato: row['Provincia/Stato'],
           categoria_manutentiva: row['Categoria Manutentiva'],
           citta: row['Città'],
-          asset: row['Asset'],
+          asset: row['Asset'], // Keep existing just in case
+          tag_asset: row['Tag_Asset'] || row['Tag Asset'] || row['Asset Tag'] || row['Asset'], // NEW MAPPING (Priority to 'Tag_Asset', then 'Asset Tag', fallback to 'Asset')
           serial_number: row['Serial number'],
           data_ultima_riassegnazione: processExcelDate(row['Data Ultima Riassegnazione']),
           ambito: row['Ambito'],
@@ -2888,6 +2895,26 @@ const INSIGHT_RULES: InsightRule[] = [
       return getWorkingDaysDiff(i.ora_violazione) >= 2;
     },
     message: (c) => `${c}`
+  },
+  {
+    id: 'indirizzi_diversi',
+    name: 'Indirizzi Diversi',
+    type: 'warning',
+    icon: MapPin,
+    check: (i) => {
+      // Exclude closed
+      if (['Chiuso', 'Closed', 'Resolved', 'Annullato'].includes(i.stato || '')) return false;
+
+      const addrIntervento = (i.indirizzo_intervento || '').trim().toLowerCase();
+      const addrBeneficiario = (i.indirizzo_beneficiario || '').trim().toLowerCase();
+
+      // If one is missing, we can't compare, assume match (return false) or mismatch? 
+      // Usually if beneficiario is empty, it's not a mismatch.
+      if (!addrIntervento || !addrBeneficiario) return false;
+
+      return addrIntervento !== addrBeneficiario;
+    },
+    message: (c) => `${c}`
   }
 ];
 
@@ -3037,9 +3064,20 @@ function App() {
       alert("Errore importazione: " + error.message);
     } else {
       if (session?.user?.id) await fetchProfile(session.user.id);
-      // alert("Importazione completata con successo!");
-      // Use a small timeout to ensure UI renders/modal closes before alert blocks thread
-      setTimeout(() => alert("Importazione completata con successo!"), 100);
+
+      // check for auto-snapshot (Phase 43)
+      const now = new Date();
+      // If it is after 17:00, we assume this is the EOD import.
+      if (now.getHours() >= 17) {
+        // Trigger SQL function
+        const { error: snapError } = await supabase.rpc('generate_daily_snapshot', { target_date: now.toISOString().split('T')[0] });
+        if (snapError) console.error("Snapshot Error", snapError);
+        else console.log("Daily Snapshot Generated");
+
+        setTimeout(() => alert("Importazione completata e Snapshot Giornaliero generato!"), 100);
+      } else {
+        setTimeout(() => alert("Importazione completata con successo!"), 100);
+      }
     }
   };
 
@@ -3383,6 +3421,7 @@ function App() {
   // BUT: If I click "In Lavorazione", should "Totale" change to only "In Lavorazione"? Usually no, KPIs act as top-level summary.
   // HOWEVER, if selectedRegion is active, KPIs *should* reflect that region.
   // So KPIs should be based on `incidents` filtered by `selectedRegion` ONLY, but NOT filtered by `selectedStatus` (otherwise clicking one zeroes the others).
+  // The previous logic was `statsData` = `incidents` filtered by `selectedRegion`. This is correct.
   const statsData = useMemo(() => {
     // Filter by Region AND Supplier (Context), but NOT Status (Selector)
     let res = incidents;
@@ -3547,6 +3586,22 @@ function App() {
     return maxTime > 0 ? new Date(maxTime) : null;
   }, [incidents]);
 
+  // Phase 71: Backlog Alert Logic
+  const snapshotNeeded = useMemo(() => {
+    if (!lastUpdateDate) return false;
+    const now = new Date();
+
+    // Condition 1: Time is past 17:10
+    const isLate = now.getHours() > 17 || (now.getHours() === 17 && now.getMinutes() >= 10);
+    if (!isLate) return false;
+
+    // Condition 2: Data is OLD (last update was before today 17:00)
+    const todayCutoff = new Date();
+    todayCutoff.setHours(17, 0, 0, 0);
+
+    return lastUpdateDate < todayCutoff;
+  }, [lastUpdateDate]);
+
   if (!session) return <AuthForm />;
 
   return (
@@ -3566,7 +3621,20 @@ function App() {
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition-colors">
             <Menu />
           </button>
-          <h1 className="text-3xl font-bold text-slate-200 tracking-tight">Monitor ISP</h1>
+
+          <div className="flex flex-col">
+            <h1 className="text-3xl font-bold text-slate-200 tracking-tight">Monitor ISP</h1>
+            {/* Phase 71: Snapshot Alert */}
+            {snapshotNeeded && (
+              <div className="flex items-center gap-2 mt-1 animate-pulse">
+                <AlertTriangle size={14} className="text-amber-500" />
+                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">
+                  Attenzione: Dati non aggiornati dopo le 17:00. Importa il file MTZ.
+                </span>
+              </div>
+            )}
+          </div>
+
           <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/5 ml-4">
             <button
               onClick={() => { setView('dashboard'); setViewMode('operational'); }}
@@ -3585,6 +3653,15 @@ function App() {
               title="Dashboard Direzionale"
             >
               <BarChart2 size={18} />
+            </button>
+            <button
+              onClick={() => { setView('trends'); setViewMode('executive'); }}
+              className={cn("p-1.5 rounded-md transition-all",
+                view === 'trends' ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300"
+              )}
+              title="Analisi Trend Storici"
+            >
+              <TrendingUp size={18} />
             </button>
             <button
               onClick={() => setView('scorecard')}
@@ -3609,7 +3686,7 @@ function App() {
         {view === 'dashboard' && (
           <>
             {viewMode === 'executive' ? (
-              <ExecutiveDashboard data={incidents} />
+              <ExecutiveDashboard data={incidents} supabaseClient={supabase} />
             ) : (
               <>
                 {(selectedRegion || selectedStatus) && (
@@ -4035,6 +4112,8 @@ function App() {
         />}
 
         {view === 'settings' && <SettingsPage />}
+
+        {view === 'trends' && <TrendAnalysisPage supabaseClient={supabase} />}
       </div>
 
       {/* Root Level Modal */}
@@ -4074,10 +4153,10 @@ function App() {
           title={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.name || 'Insight'}
           subtitle="Analisi Dettagliata"
           icon={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.icon || AlertTriangle}
-          colorTheme={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.type || 'warning'} // Cast to correct type if needed, but 'danger'/'warning' match.
+          colorTheme={allInsightRulesWithNDC.find(r => r.id === selectedInsightRule)?.type || 'warning'}
+          ruleId={selectedInsightRule} // NEW: Pass the ID to enable custom columns
           onClose={() => { setShowInsightModal(false); setSelectedInsightRule(null); }}
           onSelectIncident={(incident) => {
-            // setShowInsightModal(false); // STACKING
             setSelectedIncident(incident);
           }}
         />

@@ -34,11 +34,14 @@ interface InsightListModalProps {
     subtitle?: string; // e.g., "15 Incidenti"
     icon?: React.ElementType;
     colorTheme?: 'danger' | 'warning' | 'info' | 'blue' | 'emerald';
+    ruleId?: string | null; // NEW PROP
     onClose: () => void;
     onSelectIncident: (incident: Incident) => void;
 }
 
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' ');
+
+// ... existing code ...
 
 // Helper for date formatting
 const formatDate = (d: string | Date | undefined) => {
@@ -53,6 +56,7 @@ const InsightListModal: React.FC<InsightListModalProps> = ({
     subtitle,
     icon: Icon = List,
     colorTheme = 'blue',
+    ruleId, // Destructure new prop
     onClose,
     onSelectIncident
 }) => {
@@ -146,15 +150,27 @@ const InsightListModal: React.FC<InsightListModalProps> = ({
                 <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-slate-800/80 sticky top-0 z-10 backdrop-blur-md">
-                            <tr>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Numero</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Regione</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Stato</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Fornitore</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item / Modello</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ora Violazione</th>
-                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pianificazione</th>
-                            </tr>
+                            {ruleId === 'indirizzi_diversi' ? (
+                                // Custom Header for Indirizzi Diversi
+                                <tr>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Numero</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Regione</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Indirizzo Intervento</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-amber-500">Indirizzo Beneficiario</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Stato</th>
+                                </tr>
+                            ) : (
+                                // Default Header
+                                <tr>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Numero</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Regione</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Stato</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Fornitore</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item / Modello</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Ora Violazione</th>
+                                    <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pianificazione</th>
+                                </tr>
+                            )}
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {data.map(incident => (
@@ -174,42 +190,63 @@ const InsightListModal: React.FC<InsightListModalProps> = ({
                                         {incident.numero}
                                     </td>
                                     <td className="p-3 text-sm text-slate-300">{incident.regione || '-'}</td>
-                                    <td className="p-3 text-sm text-slate-300">
-                                        <div className="flex items-center gap-2">
-                                            <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-white/5",
-                                                ['Aperto', 'Open', 'In Corso', 'In Lavorazione'].includes(incident.stato || '') ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                                    ['Sospeso', 'Suspended'].includes(incident.stato || '') ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                                                        ['Chiuso', 'Closed', 'Resolved'].includes(incident.stato || '') ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
-                                                            "bg-slate-700 text-slate-400"
-                                            )}>{incident.stato || '-'}</span>
-                                            {incident.gruppo_assegnazione === 'EUS_LOCKER_LASER_MICROINF_INC' && (
-                                                <span className="text-[9px] font-bold bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded border border-purple-500/20">LCK</span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="p-3 text-sm text-slate-300">
-                                        {incident.fornitore ? (
-                                            <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-1 rounded border border-amber-500/20">{incident.fornitore}</span>
-                                        ) : '-'}
-                                    </td>
-                                    <td className="p-3 text-sm text-slate-300">
-                                        <div className="flex flex-col">
-                                            <span className="font-semibold text-xs">{incident.item || incident.category || '-'}</span>
-                                            <span className="text-[10px] text-slate-500">{incident.modello || '-'}</span>
-                                        </div>
-                                    </td>
-                                    <td className="p-3 text-sm text-slate-300 font-mono">
-                                        {incident.ora_violazione ? (
-                                            <span className="text-red-400">{new Date(incident.ora_violazione).toLocaleString('it-IT')}</span>
-                                        ) : '-'}
-                                    </td>
-                                    <td className="p-3 text-sm text-slate-300">
-                                        {incident.pianificazione ? (
-                                            <span className="flex items-center gap-1.5 text-emerald-400 font-mono text-xs">
-                                                <CalendarPlus size={12} /> {formatDate(incident.pianificazione)}
-                                            </span>
-                                        ) : '-'}
-                                    </td>
+
+                                    {ruleId === 'indirizzi_diversi' ? (
+                                        // Custom Body for Indirizzi Diversi
+                                        <>
+                                            <td className="p-3 text-sm text-slate-300 font-mono text-[11px] max-w-[200px]">
+                                                {incident.indirizzo_intervento || '-'}
+                                            </td>
+                                            <td className="p-3 text-sm font-mono text-[11px] max-w-[200px] text-amber-300 bg-amber-500/5 border-l-2 border-amber-500/20">
+                                                {incident.indirizzo_beneficiario || '-'}
+                                            </td>
+                                            <td className="p-3 text-sm text-slate-300">
+                                                <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-white/5",
+                                                    ['Aperto', 'Open'].includes(incident.stato || '') ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-slate-700 text-slate-400"
+                                                )}>{incident.stato || '-'}</span>
+                                            </td>
+                                        </>
+                                    ) : (
+                                        // Default Body
+                                        <>
+                                            <td className="p-3 text-sm text-slate-300">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-white/5",
+                                                        ['Aperto', 'Open', 'In Corso', 'In Lavorazione'].includes(incident.stato || '') ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                                                            ['Sospeso', 'Suspended'].includes(incident.stato || '') ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                                                                ['Chiuso', 'Closed', 'Resolved'].includes(incident.stato || '') ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
+                                                                    "bg-slate-700 text-slate-400"
+                                                    )}>{incident.stato || '-'}</span>
+                                                    {incident.gruppo_assegnazione === 'EUS_LOCKER_LASER_MICROINF_INC' && (
+                                                        <span className="text-[9px] font-bold bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded border border-purple-500/20">LCK</span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="p-3 text-sm text-slate-300">
+                                                {incident.fornitore ? (
+                                                    <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-1 rounded border border-amber-500/20">{incident.fornitore}</span>
+                                                ) : '-'}
+                                            </td>
+                                            <td className="p-3 text-sm text-slate-300">
+                                                <div className="flex flex-col">
+                                                    <span className="font-semibold text-xs">{incident.item || incident.category || '-'}</span>
+                                                    <span className="text-[10px] text-slate-500">{incident.modello || '-'}</span>
+                                                </div>
+                                            </td>
+                                            <td className="p-3 text-sm text-slate-300 font-mono">
+                                                {incident.ora_violazione ? (
+                                                    <span className="text-red-400">{new Date(incident.ora_violazione).toLocaleString('it-IT')}</span>
+                                                ) : '-'}
+                                            </td>
+                                            <td className="p-3 text-sm text-slate-300">
+                                                {incident.pianificazione ? (
+                                                    <span className="flex items-center gap-1.5 text-emerald-400 font-mono text-xs">
+                                                        <CalendarPlus size={12} /> {formatDate(incident.pianificazione)}
+                                                    </span>
+                                                ) : '-'}
+                                            </td>
+                                        </>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
@@ -220,8 +257,8 @@ const InsightListModal: React.FC<InsightListModalProps> = ({
                     <span>Totale: {data.length} righe</span>
                     <span>Doppio click per aprire dettaglio</span>
                 </div>
-            </div>
-        </div>,
+            </div >
+        </div >,
         document.body
     );
 };
